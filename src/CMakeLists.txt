@@ -1,3 +1,5 @@
+add_subdirectory(core)
+
 add_executable(giggle
     main.cpp
     ui/App.cpp

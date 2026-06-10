@@ -20,6 +20,14 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC imgui imgui/backends)
 target_link_libraries(imgui PUBLIC glfw)
 
+# nlohmann_json: JSON serialization.
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+add_subdirectory(json)
+
+# doctest: the test framework. Only the tests link it.
+set(DOCTEST_WITH_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(doctest)
+
 # ImPlot: plotting library built on ImGui.
 add_library(implot STATIC
     implot/implot.cpp
