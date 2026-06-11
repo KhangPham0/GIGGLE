@@ -68,7 +68,11 @@ struct FitRange
 struct FitModel
 {
     FitRange range;
-    FitStatistic statistic = FitStatistic::PoissonLikelihood;
+    // Chi-square by default: it matches ROOT's convention, and it keeps
+    // the data-vs-model-total comparison informative (a Poisson likelihood
+    // fit reproduces the data total by construction). Likelihood is the
+    // better choice for low-count spectra.
+    FitStatistic statistic = FitStatistic::ChiSquare;
     std::vector<FitComponent> peaks;
     std::vector<FitComponent> background;
 };

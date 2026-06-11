@@ -192,6 +192,53 @@ ValueWithError ComponentCountsWithError(const FitComponent& component, const Fit
     return counts;
 }
 
+std::optional<ValueWithError> PeakCentroid(ShapeKind kind, const ComponentResult& result)
+{
+    switch (kind)
+    {
+        case ShapeKind::Gaussian:
+        case ShapeKind::Lorentzian:
+            // The first parameter is the mean.
+            if (!result.parameters.empty())
+            {
+                return result.parameters[0];
+            }
+            return std::nullopt;
+        default:
+            return std::nullopt;
+    }
+}
+
+std::optional<ValueWithError> PeakFWHM(ShapeKind kind, const ComponentResult& result)
+{
+    switch (kind)
+    {
+        case ShapeKind::Gaussian:
+        {
+            // FWHM = 2 sqrt(2 ln 2) sigma
+            const double factor = 2.0 * std::sqrt(2.0 * std::log(2.0));
+            if (result.parameters.size() >= 2)
+            {
+                return ValueWithError{ factor * result.parameters[1].value,
+                                       factor * result.parameters[1].error };
+            }
+            return std::nullopt;
+        }
+        case ShapeKind::Lorentzian:
+        {
+            // gamma is the half width at half maximum.
+            if (result.parameters.size() >= 2)
+            {
+                return ValueWithError{ 2.0 * result.parameters[1].value,
+                                       2.0 * result.parameters[1].error };
+            }
+            return std::nullopt;
+        }
+        default:
+            return std::nullopt;
+    }
+}
+
 double BinWidthAt(const HistogramData& histogram, double x)
 {
     const std::vector<double>& edges = histogram.binEdges;

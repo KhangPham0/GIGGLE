@@ -390,6 +390,76 @@ TEST_CASE("results documents carry schema version, provenance, and named paramet
     CHECK(document.at("result").at("covariance")[0][0] == 625.0);
 }
 
+TEST_CASE("centroid and FWHM derive from the fitted parameters")
+{
+    ComponentResult gaussian;
+    gaussian.parameters = { { 150.2, 0.1 }, { 3.0, 0.2 } }; // mean, sigma
+
+    auto centroid = PeakCentroid(ShapeKind::Gaussian, gaussian);
+    REQUIRE(centroid.has_value());
+    CHECK(centroid->value == 150.2);
+    CHECK(centroid->error == 0.1);
+
+    auto fwhm = PeakFWHM(ShapeKind::Gaussian, gaussian);
+    REQUIRE(fwhm.has_value());
+    CHECK(fwhm->value == doctest::Approx(2.354820045 * 3.0));
+    CHECK(fwhm->error == doctest::Approx(2.354820045 * 0.2));
+
+    ComponentResult lorentzian;
+    lorentzian.parameters = { { 170.0, 0.3 }, { 1.5, 0.1 } }; // mean, gamma (HWHM)
+    auto lorentzianFwhm = PeakFWHM(ShapeKind::Lorentzian, lorentzian);
+    REQUIRE(lorentzianFwhm.has_value());
+    CHECK(lorentzianFwhm->value == doctest::Approx(3.0));
+
+    // Backgrounds have neither.
+    ComponentResult background;
+    background.parameters = { { -0.002, 0.0004 } };
+    CHECK(!PeakCentroid(ShapeKind::Linear, background).has_value());
+    CHECK(!PeakFWHM(ShapeKind::Linear, background).has_value());
+}
+
+TEST_CASE("results export carries warnings, the cross-check, and a CSV table")
+{
+    FitModel model = MakeRichModel();
+
+    FitResult result;
+    result.converged = true;
+    result.chiSquare = 42.5;
+    result.degreesOfFreedom = 37;
+    result.peaks = {
+        { "Peak 1", { 512.0, 25.0 }, { 66.2, 3.1 }, { { 150.2, 0.1 }, { 3.0, 0.0 } } },
+    };
+    result.background = {
+        { "Background", { 1980.0, 60.0 }, { 13.1, 0.4 }, { { -0.0021, 0.0004 } } },
+    };
+    result.totalCounts = { 2492.0, 65.0 };
+    result.normSumCheck = { true, true, "largest count deviation 0.02%" };
+    result.warnings = { "Peak 1 extends past the fit range; its counts cover only the in-range part" };
+
+    Provenance provenance = MakeProvenance("run52.root", "spectra/h_ex");
+
+    Json document = MakeResultsDocument(provenance, model, result);
+    CHECK(document.at("result").at("normsum_cross_check").at("agreed") == true);
+    CHECK(document.at("result").at("warnings").size() == 1);
+    CHECK(document.at("result").at("peaks")[0].at("centroid").at("value") == 150.2);
+    CHECK(document.at("result").at("peaks")[0].at("fwhm").at("value")
+          == doctest::Approx(2.354820045 * 3.0));
+
+    std::string csv = MakeResultsCsv(provenance, model, result);
+    CHECK(csv.find("component,shape,counts,counts_error,centroid,") == 0);
+    CHECK(csv.find("Peak 1,gaussian,512,25,150.2,0.1,") != std::string::npos);
+    CHECK(csv.find("Background,linear,1980,60,,,,,13.1,0.4,") != std::string::npos);
+    CHECK(csv.find("spectra/h_ex,run52.root,") != std::string::npos);
+
+    // Two component rows plus the header.
+    int lines = 0;
+    for (char c : csv)
+    {
+        lines += c == '\n' ? 1 : 0;
+    }
+    CHECK(lines == 3);
+}
+
 TEST_CASE("version is defined")
 {
     CHECK(std::string(Version()) != "");

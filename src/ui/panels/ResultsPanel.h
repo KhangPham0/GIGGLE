@@ -10,16 +10,29 @@ struct ImFont;
 
 namespace giggle {
 
-// Bottom panel: fit results, including the raw data counts in the fit
-// range so the model total can be checked against the physical number.
-// The full results table comes next.
+// What the user did in the Results panel this frame.
+struct ResultsAction
+{
+    bool saveJsonRequested = false;
+    bool saveCsvRequested = false;
+    bool copyCsvRequested = false;
+};
+
+// Bottom panel: the fit results table -- counts, centroids, FWHM -- with
+// the raw data counts in range for comparison, warnings, the cross-check
+// verdict, and export buttons.
 class ResultsPanel
 {
 public:
     static constexpr const char* Title = "Results";
 
-    void Draw(const FitResult* result, const HistogramData* histogram, const FitModel* model,
-              const Theme& theme, ImFont* monoFont);
+    ResultsAction Draw(const FitResult* result, const HistogramData* histogram,
+                       const FitModel* model, const Theme& theme, ImFont* monoFont);
+
+private:
+    void DrawSummaryLine(const FitResult& result, const Theme& theme, ImFont* monoFont);
+    void DrawComponentsTable(const FitResult& result, const FitModel& model, ImFont* monoFont);
+    void DrawWarnings(const FitResult& result, const Theme& theme);
 };
 
 } // namespace giggle

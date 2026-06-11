@@ -60,6 +60,10 @@ struct FitResult
 
     CrossCheck normSumCheck;
 
+    // Human-readable cautions about this result (a peak extending past
+    // the fit range, a parameter sitting on its bound, ...).
+    std::vector<std::string> warnings;
+
     // Covariance matrix of the parameters, in the engine's parameter
     // order: for each component (peaks first, then background, in model
     // order), the amplitude followed by that component's shape parameters.

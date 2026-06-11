@@ -56,6 +56,9 @@ private:
     void PollFit();          // collects a finished fit, applies it to the model
     bool FitRunning() const { return m_fitFuture.valid(); }
 
+    void SaveResults(bool asCsv);
+    void CopyResultsCsv();
+
     GLFWwindow* m_window = nullptr;
     Theme m_theme;
     Fonts m_fonts;
@@ -68,6 +71,7 @@ private:
     std::string m_startupFile;
 
     std::unique_ptr<SpectrumSource> m_source;
+    std::string m_sourceFilePath; // full path of the open file, for provenance
     std::string m_selectedHistogram;
     std::optional<HistogramData> m_histogram;
 
@@ -82,6 +86,10 @@ private:
     std::future<FitResult> m_fitFuture;
     std::optional<FitResult> m_fitResult;
     std::optional<FitModel> m_preFitModel;
+
+    // The model exactly as it was fitted, frozen for export even if the
+    // user keeps editing afterwards.
+    std::optional<FitModel> m_fittedModel;
 
     std::string m_errorMessage; // non-empty: the error popup is shown
 

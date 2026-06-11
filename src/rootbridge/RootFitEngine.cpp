@@ -258,6 +258,87 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
     return check;
 }
 
+// True when a free parameter has converged onto one of its bounds, where
+// the parabolic uncertainty is unreliable.
+bool SitsOnBound(const FitParameter& parameter, double fittedValue, double fittedError)
+{
+    if (parameter.fixed)
+    {
+        return false;
+    }
+    double tolerance = std::max(0.01 * fittedError, 1e-9 * std::max(1.0, std::abs(fittedValue)));
+    if (parameter.lowerBound.has_value() && std::abs(fittedValue - parameter.lowerBound.value()) <= tolerance)
+    {
+        return true;
+    }
+    if (parameter.upperBound.has_value() && std::abs(fittedValue - parameter.upperBound.value()) <= tolerance)
+    {
+        return true;
+    }
+    return false;
+}
+
+// Cautions the user should see next to the numbers.
+std::vector<std::string> CollectWarnings(const FitModel& fitted, const FitResult& result,
+                                         const FitRange& range)
+{
+    std::vector<std::string> warnings;
+
+    // Peaks whose core extends past the fit range: the reported counts are
+    // only the in-range part.
+    for (size_t i = 0; i < fitted.peaks.size() && i < result.peaks.size(); ++i)
+    {
+        const FitComponent& peak = fitted.peaks[i];
+        double center = 0.0;
+        double width = 0.0; // a 3-sigma-like half width
+        if (peak.shape == ShapeKind::Gaussian && peak.parameters.size() >= 2)
+        {
+            center = peak.parameters[0].value;
+            width = 3.0 * std::abs(peak.parameters[1].value);
+        }
+        else if (peak.shape == ShapeKind::Lorentzian && peak.parameters.size() >= 2)
+        {
+            center = peak.parameters[0].value;
+            width = 3.0 * std::abs(peak.parameters[1].value);
+        }
+        else
+        {
+            continue;
+        }
+
+        if (center - width < range.min || center + width > range.max)
+        {
+            warnings.push_back(peak.label + " extends past the fit range; its counts cover only the in-range part");
+        }
+    }
+
+    // Parameters sitting on a bound.
+    auto checkComponent = [&warnings](const FitComponent& component, const ComponentResult& fit) {
+        if (SitsOnBound(component.amplitude, fit.amplitude.value, fit.amplitude.error))
+        {
+            warnings.push_back(component.label + " amplitude is at its bound; the uncertainties are unreliable there");
+        }
+        for (size_t j = 0; j < component.parameters.size() && j < fit.parameters.size(); ++j)
+        {
+            if (SitsOnBound(component.parameters[j], fit.parameters[j].value, fit.parameters[j].error))
+            {
+                warnings.push_back(component.label + " " + component.parameters[j].name
+                                   + " is at its bound; the uncertainties are unreliable there");
+            }
+        }
+    };
+    for (size_t i = 0; i < fitted.peaks.size() && i < result.peaks.size(); ++i)
+    {
+        checkComponent(fitted.peaks[i], result.peaks[i]);
+    }
+    for (size_t i = 0; i < fitted.background.size() && i < result.background.size(); ++i)
+    {
+        checkComponent(fitted.background[i], result.background[i]);
+    }
+
+    return warnings;
+}
+
 ComponentResult ReadComponentResult(const ROOT::Fit::FitResult& fit, const ComponentSlot& slot)
 {
     ComponentResult result;
@@ -475,6 +556,8 @@ FitResult RootFitEngine::Fit(const HistogramData& histogram, const FitModel& mod
 
         // Curves of the fitted model, in the same units as the data.
         result.curves = SampleModelCurves(fitted, 400, &histogram);
+
+        result.warnings = CollectWarnings(fitted, result, range);
 
         // Every converged fit is checked against an independent ROOT
         // implementation of the same counts.

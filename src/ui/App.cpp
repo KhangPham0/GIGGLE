@@ -3,6 +3,9 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+
+#include "core/Serialization.h"
 
 #include "imgui.h"
 #include "imgui_internal.h" // DockBuilder API, used for the default layout
@@ -174,11 +177,25 @@ void App::DrawFrame()
         m_model = m_preFitModel.value();
         m_preFitModel.reset();
         m_fitResult.reset();
+        m_fittedModel.reset();
     }
 
-    m_resultsPanel.Draw(m_fitResult.has_value() ? &m_fitResult.value() : nullptr,
-                        m_histogram.has_value() ? &m_histogram.value() : nullptr,
-                        &m_model, m_theme, m_fonts.mono);
+    ResultsAction resultsAction =
+        m_resultsPanel.Draw(m_fitResult.has_value() ? &m_fitResult.value() : nullptr,
+                            m_histogram.has_value() ? &m_histogram.value() : nullptr,
+                            &m_model, m_theme, m_fonts.mono);
+    if (resultsAction.saveJsonRequested)
+    {
+        SaveResults(false);
+    }
+    if (resultsAction.saveCsvRequested)
+    {
+        SaveResults(true);
+    }
+    if (resultsAction.copyCsvRequested)
+    {
+        CopyResultsCsv();
+    }
 
     DrawErrorPopup();
 }
@@ -248,6 +265,7 @@ void App::OpenFile(const std::string& filePath)
     try
     {
         m_source = m_openSource(filePath);
+        m_sourceFilePath = filePath;
         std::string fileName = std::filesystem::path(filePath).filename().string();
         m_fileTreePanel.SetContents(fileName, m_source->List());
         m_selectedHistogram.clear();
@@ -265,6 +283,12 @@ void App::LoadHistogram(const std::string& path)
     {
         m_histogram = m_source->Load(path);
         m_selectedHistogram = path;
+
+        // Results belong to the histogram they were fitted on; the model
+        // stays, so the same setup can be reused across histograms.
+        m_fitResult.reset();
+        m_fittedModel.reset();
+        m_preFitModel.reset();
 
         // Give the fit range a sensible start, but never overwrite a range
         // the user has set: the same model is often reused across the
@@ -309,7 +333,63 @@ void App::PollFit()
     {
         // The panel and the preview curves now show the fitted model.
         ApplyFitResult(m_fitResult.value(), m_model);
+        m_fittedModel = m_model;
     }
+}
+
+void App::SaveResults(bool asCsv)
+{
+    if (!m_fitResult.has_value() || !m_fittedModel.has_value())
+    {
+        return;
+    }
+
+    // Default name and place: next to the data, named after the histogram.
+    std::string histogramName = std::filesystem::path(m_selectedHistogram).filename().string();
+    std::string defaultName = histogramName + "_fit." + (asCsv ? "csv" : "json");
+    std::string defaultDirectory = std::filesystem::path(m_sourceFilePath).parent_path().string();
+
+    nfdu8char_t* selectedPath = nullptr;
+    nfdu8filteritem_t filter = asCsv ? nfdu8filteritem_t{ "CSV", "csv" }
+                                     : nfdu8filteritem_t{ "JSON", "json" };
+    nfdresult_t outcome = NFD_SaveDialogU8(&selectedPath, &filter, 1,
+                                           defaultDirectory.c_str(), defaultName.c_str());
+    if (outcome == NFD_CANCEL)
+    {
+        return;
+    }
+    if (outcome == NFD_ERROR)
+    {
+        m_errorMessage = NFD_GetError();
+        return;
+    }
+
+    Provenance provenance = MakeProvenance(m_sourceFilePath, m_selectedHistogram);
+    std::string content = asCsv
+        ? MakeResultsCsv(provenance, m_fittedModel.value(), m_fitResult.value())
+        : MakeResultsDocument(provenance, m_fittedModel.value(), m_fitResult.value()).dump(4) + "\n";
+
+    std::ofstream file(selectedPath);
+    if (file)
+    {
+        file << content;
+    }
+    if (!file)
+    {
+        m_errorMessage = std::string("could not write ") + selectedPath;
+    }
+    NFD_FreePathU8(selectedPath);
+}
+
+void App::CopyResultsCsv()
+{
+    if (!m_fitResult.has_value() || !m_fittedModel.has_value())
+    {
+        return;
+    }
+    Provenance provenance = MakeProvenance(m_sourceFilePath, m_selectedHistogram);
+    std::string csv = MakeResultsCsv(provenance, m_fittedModel.value(), m_fitResult.value());
+    ImGui::SetClipboardText(csv.c_str());
 }
 
 // The default three-pane layout: file tree left, plot center, fit model

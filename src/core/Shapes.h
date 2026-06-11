@@ -1,6 +1,7 @@
 #ifndef GIGGLE_CORE_SHAPES_H
 #define GIGGLE_CORE_SHAPES_H
 
+#include <optional>
 #include <vector>
 
 #include "FitModel.h"
@@ -67,6 +68,11 @@ std::vector<double> ComponentCountsGradient(const FitComponent& component, const
 // [amplitude, shape parameters...] order: sigma^2 = g . C . g.
 ValueWithError ComponentCountsWithError(const FitComponent& component, const FitRange& range,
                                         const std::vector<std::vector<double>>& covarianceBlock);
+
+// Derived peak properties with linearly propagated errors. Empty when the
+// shape has no such property (backgrounds; shapes not yet implemented).
+std::optional<ValueWithError> PeakCentroid(ShapeKind kind, const ComponentResult& result);
+std::optional<ValueWithError> PeakFWHM(ShapeKind kind, const ComponentResult& result);
 
 // The width of the bin containing x (the width of the nearest bin when x
 // is outside the histogram).

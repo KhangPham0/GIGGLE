@@ -1,8 +1,11 @@
 #include "Serialization.h"
 
+#include <cstdio>
 #include <ctime>
+#include <sstream>
 #include <stdexcept>
 
+#include "Shapes.h"
 #include "Version.h"
 
 namespace giggle {
@@ -107,13 +110,31 @@ Json ProvenanceToJson(const Provenance& provenance)
     return json;
 }
 
+Json ValueWithErrorToJson(const ValueWithError& quantity)
+{
+    return { { "value", quantity.value }, { "error", quantity.error } };
+}
+
 // Joins fitted values with their parameter names from the model component.
 Json ComponentResultToJson(const ComponentResult& result, const FitComponent& modelComponent)
 {
     Json json;
     json["label"] = result.label;
-    json["counts_in_range"] = { { "value", result.counts.value }, { "error", result.counts.error } };
-    json["amplitude"] = { { "value", result.amplitude.value }, { "error", result.amplitude.error } };
+    json["counts_in_range"] = ValueWithErrorToJson(result.counts);
+    json["amplitude"] = ValueWithErrorToJson(result.amplitude);
+
+    // Derived peak properties, when the shape defines them.
+    std::optional<ValueWithError> centroid = PeakCentroid(modelComponent.shape, result);
+    if (centroid.has_value())
+    {
+        json["centroid"] = ValueWithErrorToJson(centroid.value());
+    }
+    std::optional<ValueWithError> fwhm = PeakFWHM(modelComponent.shape, result);
+    if (fwhm.has_value())
+    {
+        json["fwhm"] = ValueWithErrorToJson(fwhm.value());
+    }
+
     json["parameters"] = Json::array();
     for (size_t i = 0; i < result.parameters.size(); ++i)
     {
@@ -219,12 +240,93 @@ Json MakeResultsDocument(const Provenance& provenance, const FitModel& model, co
         resultJson["background"].push_back(ComponentResultToJson(result.background[i], modelComponent));
     }
 
-    resultJson["total_counts_in_range"] = { { "value", result.totalCounts.value },
-                                            { "error", result.totalCounts.error } };
+    resultJson["total_counts_in_range"] = ValueWithErrorToJson(result.totalCounts);
+
+    Json crossCheckJson;
+    crossCheckJson["performed"] = result.normSumCheck.performed;
+    crossCheckJson["agreed"] = result.normSumCheck.agreed;
+    crossCheckJson["detail"] = result.normSumCheck.detail;
+    resultJson["normsum_cross_check"] = crossCheckJson;
+
+    resultJson["warnings"] = result.warnings;
     resultJson["covariance"] = result.covariance;
 
     json["result"] = resultJson;
     return json;
+}
+
+namespace {
+
+// One CSV cell from a double, with enough digits to round-trip.
+std::string Cell(double value)
+{
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "%.10g", value);
+    return buffer;
+}
+
+// Quotes a string cell if it contains characters CSV cares about.
+std::string Cell(const std::string& text)
+{
+    if (text.find_first_of(",\"\n") == std::string::npos)
+    {
+        return text;
+    }
+    std::string quoted = "\"";
+    for (char c : text)
+    {
+        if (c == '"')
+        {
+            quoted += '"';
+        }
+        quoted += c;
+    }
+    quoted += '"';
+    return quoted;
+}
+
+void AppendCsvRow(std::ostringstream& out, const ComponentResult& component,
+                  const FitComponent& modelComponent, const Provenance& provenance,
+                  const FitResult& result)
+{
+    std::optional<ValueWithError> centroid = PeakCentroid(modelComponent.shape, component);
+    std::optional<ValueWithError> fwhm = PeakFWHM(modelComponent.shape, component);
+
+    out << Cell(component.label) << ',' << ShapeKindName(modelComponent.shape) << ','
+        << Cell(component.counts.value) << ',' << Cell(component.counts.error) << ','
+        << (centroid.has_value() ? Cell(centroid->value) : "") << ','
+        << (centroid.has_value() ? Cell(centroid->error) : "") << ','
+        << (fwhm.has_value() ? Cell(fwhm->value) : "") << ','
+        << (fwhm.has_value() ? Cell(fwhm->error) : "") << ','
+        << Cell(component.amplitude.value) << ',' << Cell(component.amplitude.error) << ','
+        << Cell(result.chiSquare) << ',' << result.degreesOfFreedom << ','
+        << Cell(provenance.histogramName) << ',' << Cell(provenance.sourceFile) << ','
+        << provenance.timestamp << '\n';
+}
+
+} // namespace
+
+std::string MakeResultsCsv(const Provenance& provenance, const FitModel& model, const FitResult& result)
+{
+    std::ostringstream out;
+    out << "component,shape,counts,counts_error,centroid,centroid_error,"
+           "fwhm,fwhm_error,amplitude,amplitude_error,chi2,ndf,"
+           "histogram,source_file,timestamp\n";
+
+    for (size_t i = 0; i < result.peaks.size(); ++i)
+    {
+        const FitComponent& modelComponent =
+            i < model.peaks.size() ? model.peaks[i] : FitComponent{};
+        AppendCsvRow(out, result.peaks[i], modelComponent, provenance, result);
+    }
+    for (size_t i = 0; i < result.background.size(); ++i)
+    {
+        const FitComponent& modelComponent =
+            i < model.background.size() ? model.background[i] : FitComponent{};
+        AppendCsvRow(out, result.background[i], modelComponent, provenance, result);
+    }
+
+    return out.str();
 }
 
 } // namespace giggle

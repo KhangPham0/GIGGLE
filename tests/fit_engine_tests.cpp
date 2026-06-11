@@ -254,6 +254,47 @@ TEST_CASE("fixed parameters stay fixed, including the amplitude")
     CHECK(!fixedResult.normSumCheck.performed);
 }
 
+TEST_CASE("the result warns when a peak leaves the range or a parameter hits a bound")
+{
+    RootFitEngine engine;
+    HistogramData data = GenerateToy(23);
+
+    // A clean central peak: no warnings.
+    FitResult clean = engine.Fit(data, MakeToyModel());
+    REQUIRE(clean.converged);
+    CHECK(clean.warnings.empty());
+
+    // The fit window cut down to [44, 56]: the peak's 3 sigma extends past
+    // both edges. Sigma is fixed to keep this narrow-window fit stable.
+    FitModel clipped = MakeToyModel();
+    clipped.range = { 44.0, 56.0 };
+    clipped.peaks[0].parameters[1].value = 3.0;
+    clipped.peaks[0].parameters[1].fixed = true;
+    FitResult clippedResult = engine.Fit(data, clipped);
+    REQUIRE(clippedResult.converged);
+    REQUIRE(!clippedResult.warnings.empty());
+    CHECK(clippedResult.warnings[0].find("extends past the fit range") != std::string::npos);
+
+    // An amplitude forced onto its bound: the true amplitude is ~66, so a
+    // lower bound of 90 pins the parameter there.
+    FitModel pinned = MakeToyModel();
+    pinned.peaks[0].amplitude.value = 95.0;
+    pinned.peaks[0].amplitude.lowerBound = 90.0;
+    FitResult pinnedResult = engine.Fit(data, pinned);
+    if (pinnedResult.converged)
+    {
+        bool foundBoundWarning = false;
+        for (const std::string& warning : pinnedResult.warnings)
+        {
+            if (warning.find("at its bound") != std::string::npos)
+            {
+                foundBoundWarning = true;
+            }
+        }
+        CHECK(foundBoundWarning);
+    }
+}
+
 TEST_CASE("unsupported shapes and empty models fail gracefully")
 {
     RootFitEngine engine;

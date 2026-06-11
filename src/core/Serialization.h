@@ -39,6 +39,10 @@ FitModel FitModelFromJson(const Json& json);
 // needed to give the result parameters their names.
 Json MakeResultsDocument(const Provenance& provenance, const FitModel& model, const FitResult& result);
 
+// The same results as a flat CSV table, one row per component, for
+// spreadsheets and pandas.
+std::string MakeResultsCsv(const Provenance& provenance, const FitModel& model, const FitResult& result);
+
 } // namespace giggle
 
 #endif
