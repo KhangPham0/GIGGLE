@@ -1,10 +1,13 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest/doctest.h"
 
+#include <cmath>
+
 #include "core/FitModel.h"
 #include "core/FitResult.h"
 #include "core/HistogramData.h"
 #include "core/Serialization.h"
+#include "core/Shapes.h"
 #include "core/Version.h"
 
 using namespace giggle;
@@ -189,6 +192,87 @@ TEST_CASE("results documents carry schema version, provenance, and named paramet
     CHECK(document.at("result").at("peaks")[0].at("parameters")[0].at("name") == "mean");
     CHECK(document.at("result").at("background")[1].at("parameters")[1].at("name") == "width");
     CHECK(document.at("result").at("covariance")[0][0] == 625.0);
+}
+
+// Numerically integrates a component over the range with the trapezoid rule.
+static double IntegrateComponent(const FitComponent& component, const FitRange& range, int steps = 20000)
+{
+    double sum = 0.0;
+    double dx = (range.max - range.min) / steps;
+    for (int i = 0; i < steps; ++i)
+    {
+        double left = ComponentValue(component, range, range.min + i * dx);
+        double right = ComponentValue(component, range, range.min + (i + 1) * dx);
+        sum += 0.5 * (left + right) * dx;
+    }
+    return sum;
+}
+
+TEST_CASE("every implemented shape integrates to its yield over the fit range")
+{
+    // The in-range count convention: yield * shape / norm must integrate to
+    // the yield, whatever the shape and wherever the peak sits.
+    FitRange range{ 100.0, 250.0 };
+
+    auto makeComponent = [](ShapeKind shape, std::vector<double> values) {
+        FitComponent component;
+        component.shape = shape;
+        component.yield = { "yield", 500.0, false, std::nullopt, std::nullopt };
+        std::vector<std::string> names = ShapeParameterNames(shape);
+        for (size_t i = 0; i < values.size(); ++i)
+        {
+            component.parameters.push_back({ i < names.size() ? names[i] : "p", values[i],
+                                             false, std::nullopt, std::nullopt });
+        }
+        return component;
+    };
+
+    // Includes a Gaussian hanging off the range edge: the yield still means
+    // counts inside the range.
+    CHECK(IntegrateComponent(makeComponent(ShapeKind::Gaussian, { 150.0, 5.0 }), range) == doctest::Approx(500.0).epsilon(1e-6));
+    CHECK(IntegrateComponent(makeComponent(ShapeKind::Gaussian, { 245.0, 8.0 }), range) == doctest::Approx(500.0).epsilon(1e-6));
+    CHECK(IntegrateComponent(makeComponent(ShapeKind::Lorentzian, { 175.0, 4.0 }), range) == doctest::Approx(500.0).epsilon(1e-6));
+    CHECK(IntegrateComponent(makeComponent(ShapeKind::Constant, {}), range) == doctest::Approx(500.0).epsilon(1e-6));
+    CHECK(IntegrateComponent(makeComponent(ShapeKind::Linear, { -0.002 }), range) == doctest::Approx(500.0).epsilon(1e-6));
+    CHECK(IntegrateComponent(makeComponent(ShapeKind::Quadratic, { -0.002, 0.00001 }), range) == doctest::Approx(500.0).epsilon(1e-6));
+    CHECK(IntegrateComponent(makeComponent(ShapeKind::Exponential, { -0.01 }), range) == doctest::Approx(500.0).epsilon(1e-6));
+}
+
+TEST_CASE("gaussian shape integral matches the closed form over a wide range")
+{
+    FitComponent gaussian;
+    gaussian.shape = ShapeKind::Gaussian;
+    gaussian.parameters = {
+        { "mean", 0.0, false, std::nullopt, std::nullopt },
+        { "sigma", 2.0, false, std::nullopt, std::nullopt },
+    };
+    // Far enough out that the missing tails are negligible: sigma*sqrt(2*pi).
+    CHECK(ShapeIntegral(gaussian, -100.0, 100.0) == doctest::Approx(2.0 * std::sqrt(2.0 * M_PI)).epsilon(1e-9));
+}
+
+TEST_CASE("model curves sample the range and sum to the total")
+{
+    FitModel model = MakeRichModel(); // contains a custom shape, which draws as 0
+    FitCurves curves = SampleModelCurves(model, 101);
+
+    REQUIRE(curves.x.size() == 101);
+    CHECK(curves.x.front() == doctest::Approx(model.range.min));
+    CHECK(curves.x.back() == doctest::Approx(model.range.max));
+    REQUIRE(curves.components.size() == 4); // 2 peaks + 2 background entries
+
+    for (size_t i = 0; i < curves.x.size(); ++i)
+    {
+        double sum = 0.0;
+        for (const std::vector<double>& component : curves.components)
+        {
+            sum += component[i];
+        }
+        CHECK(curves.total[i] == doctest::Approx(sum));
+    }
+
+    // Voigt and custom shapes have no curve yet.
+    FitComponent custom = model.background[1];
+    CHECK(ComponentValue(custom, model.range, 180.0) == 0.0);
 }
 
 TEST_CASE("version is defined")

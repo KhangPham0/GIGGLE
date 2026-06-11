@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 
+#include "core/FitModel.h"
 #include "core/HistogramData.h"
 #include "core/SpectrumSource.h"
 #include "Fonts.h"
@@ -62,6 +63,10 @@ private:
     std::unique_ptr<SpectrumSource> m_source;
     std::string m_selectedHistogram;
     std::optional<HistogramData> m_histogram;
+
+    // The fit being built. The fit panel edits it and the plot draws it;
+    // both see this one instance.
+    FitModel m_model;
 
     std::string m_errorMessage; // non-empty: the error popup is shown
 

@@ -4,6 +4,7 @@
 add_library(giggle_core STATIC
     FitModel.cpp
     Serialization.cpp
+    Shapes.cpp
     Version.cpp
 )
 

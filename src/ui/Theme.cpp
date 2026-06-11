@@ -46,6 +46,17 @@ Theme DarkTheme()
     t.histogramFill  = Hex(0xB9C2CC, 0.25f);
     t.fitCurve       = t.accent;
 
+    // Okabe-Ito palette: distinguishable under common color blindness.
+    t.componentColors = {
+        Hex(0xE69F00), // orange
+        Hex(0xCC79A7), // purple
+        Hex(0x56B4E9), // sky blue
+        Hex(0x009E73), // green
+        Hex(0xD55E00), // vermillion
+        Hex(0xF0E442), // yellow
+        Hex(0x0072B2), // blue
+    };
+
     return t;
 }
 

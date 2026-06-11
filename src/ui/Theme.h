@@ -1,6 +1,8 @@
 #ifndef GIGGLE_UI_THEME_H
 #define GIGGLE_UI_THEME_H
 
+#include <vector>
+
 #include "imgui.h"
 
 namespace giggle {
@@ -46,6 +48,16 @@ struct Theme
     ImVec4 histogramLine;
     ImVec4 histogramFill;
     ImVec4 fitCurve;
+
+    // Colors for individual model components (cycled when there are more
+    // components than colors).
+    std::vector<ImVec4> componentColors;
+
+    ImVec4 ComponentColor(size_t index) const
+    {
+        return componentColors.empty() ? fitCurve
+                                       : componentColors[index % componentColors.size()];
+    }
 };
 
 // The default GIGGLE theme.

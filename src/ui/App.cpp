@@ -154,8 +154,9 @@ void App::DrawFrame()
         LoadHistogram(action.histogramClicked.value());
     }
 
-    m_plotPanel.Draw(m_histogram.has_value() ? &m_histogram.value() : nullptr, m_theme, m_fonts.mono);
-    m_fitModelPanel.Draw();
+    m_plotPanel.Draw(m_histogram.has_value() ? &m_histogram.value() : nullptr,
+                     &m_model, m_theme, m_fonts.mono);
+    m_fitModelPanel.Draw(m_model, m_histogram.has_value(), m_fonts.mono);
     m_resultsPanel.Draw();
 
     DrawErrorPopup();
@@ -243,6 +244,14 @@ void App::LoadHistogram(const std::string& path)
     {
         m_histogram = m_source->Load(path);
         m_selectedHistogram = path;
+
+        // Give the fit range a sensible start, but never overwrite a range
+        // the user has set: the same model is often reused across the
+        // histograms of one file.
+        if (m_model.range.max <= m_model.range.min)
+        {
+            m_model.range = { m_histogram->XMin(), m_histogram->XMax() };
+        }
     }
     catch (const std::exception& error)
     {
