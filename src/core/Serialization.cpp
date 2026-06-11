@@ -62,7 +62,7 @@ Json ComponentToJson(const FitComponent& component)
     {
         json["formula"] = component.formula;
     }
-    json["yield"] = ParameterToJson(component.yield);
+    json["amplitude"] = ParameterToJson(component.amplitude);
     json["parameters"] = Json::array();
     for (const FitParameter& parameter : component.parameters)
     {
@@ -89,7 +89,7 @@ FitComponent ComponentFromJson(const Json& json)
         component.formula = json.at("formula").get<std::string>();
     }
 
-    component.yield = ParameterFromJson(json.at("yield"));
+    component.amplitude = ParameterFromJson(json.at("amplitude"));
     for (const Json& parameterJson : json.at("parameters"))
     {
         component.parameters.push_back(ParameterFromJson(parameterJson));
@@ -112,7 +112,8 @@ Json ComponentResultToJson(const ComponentResult& result, const FitComponent& mo
 {
     Json json;
     json["label"] = result.label;
-    json["yield"] = { { "value", result.yield.value }, { "error", result.yield.error } };
+    json["counts_in_range"] = { { "value", result.counts.value }, { "error", result.counts.error } };
+    json["amplitude"] = { { "value", result.amplitude.value }, { "error", result.amplitude.error } };
     json["parameters"] = Json::array();
     for (size_t i = 0; i < result.parameters.size(); ++i)
     {
@@ -218,6 +219,8 @@ Json MakeResultsDocument(const Provenance& provenance, const FitModel& model, co
         resultJson["background"].push_back(ComponentResultToJson(result.background[i], modelComponent));
     }
 
+    resultJson["total_counts_in_range"] = { { "value", result.totalCounts.value },
+                                            { "error", result.totalCounts.error } };
     resultJson["covariance"] = result.covariance;
 
     json["result"] = resultJson;

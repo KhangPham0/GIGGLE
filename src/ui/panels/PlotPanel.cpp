@@ -35,7 +35,7 @@ void PlotPanel::Draw(const HistogramData* histogram, const FitModel* model,
             }
             if (model != nullptr && histogram != nullptr)
             {
-                DrawModelOverlay(*model, theme);
+                DrawModelOverlay(*model, *histogram, theme);
             }
 
             ImPlot::EndPlot();
@@ -67,7 +67,8 @@ void PlotPanel::DrawHistogram(const HistogramData& histogram, const Theme& theme
     ImPlot::PlotStairs("##data_line", xs.data(), ys.data(), pointCount, lineSpec);
 }
 
-void PlotPanel::DrawModelOverlay(const FitModel& model, const Theme& theme)
+void PlotPanel::DrawModelOverlay(const FitModel& model, const HistogramData& histogram,
+                                 const Theme& theme)
 {
     bool hasComponents = !model.peaks.empty() || !model.background.empty();
     bool hasRange = model.range.max > model.range.min;
@@ -87,7 +88,9 @@ void PlotPanel::DrawModelOverlay(const FitModel& model, const Theme& theme)
         return;
     }
 
-    FitCurves curves = SampleModelCurves(model, 400);
+    // The histogram converts the model's densities into counts per bin, so
+    // the curves overlay the data in the same units.
+    FitCurves curves = SampleModelCurves(model, 400, &histogram);
     if (curves.x.empty())
     {
         return;

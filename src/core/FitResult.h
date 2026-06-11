@@ -17,8 +17,19 @@ struct ValueWithError
 struct ComponentResult
 {
     std::string label;
-    ValueWithError yield; // counts in the fit range
+    ValueWithError counts;    // counts in the fit range, derived from the
+                              // fit with the covariance-propagated error
+    ValueWithError amplitude; // the fitted amplitude parameter
     std::vector<ValueWithError> parameters;
+};
+
+// The outcome of re-fitting the same data through ROOT's TF1NormSum and
+// comparing its in-range counts against ours. Runs on every converged fit.
+struct CrossCheck
+{
+    bool performed = false; // false: see detail for why it was skipped
+    bool agreed = false;
+    std::string detail;
 };
 
 // Curves sampled by the fit engine for drawing. Not serialized.
@@ -42,13 +53,26 @@ struct FitResult
     std::vector<ComponentResult> peaks;
     std::vector<ComponentResult> background;
 
-    // Covariance matrix of the free parameters, in the engine's parameter
+    // The model's total counts in the fit range, with the error from the
+    // full covariance (correlations included). Directly comparable to the
+    // raw data counts in the range.
+    ValueWithError totalCounts;
+
+    CrossCheck normSumCheck;
+
+    // Covariance matrix of the parameters, in the engine's parameter
     // order: for each component (peaks first, then background, in model
-    // order), the yield followed by that component's shape parameters.
+    // order), the amplitude followed by that component's shape parameters.
     std::vector<std::vector<double>> covariance;
 
     FitCurves curves;
 };
+
+struct FitModel;
+
+// Writes the fitted values back into the model, so the panel and the
+// preview curves show the fit. Errors stay in the result.
+void ApplyFitResult(const FitResult& result, FitModel& model);
 
 } // namespace giggle
 

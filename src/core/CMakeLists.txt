@@ -3,6 +3,7 @@
 # no ROOT, no GUI.
 add_library(giggle_core STATIC
     FitModel.cpp
+    FitResult.cpp
     Serialization.cpp
     Shapes.cpp
     Version.cpp

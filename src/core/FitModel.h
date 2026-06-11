@@ -34,16 +34,21 @@ enum class ShapeKind
 
 // One additive component of the fit function.
 //
-// Every component is modeled as yield * (shape normalized over the fit
-// range), so shape parameters never include an overall scale: the yield
-// carries it, and equals the component's counts within the fit range.
+// Every component is modeled as amplitude * shape, where shapes are
+// defined to be 1 at their reference point (a peak's mean; the fit range
+// center for backgrounds). The amplitude is therefore the component's
+// density at that point, and amplitude * bin width is the height read off
+// the plot -- a constant conversion, so fixing or bounding the height is
+// exactly fixing or bounding this parameter. The component's counts within
+// the fit range are computed from the fit afterwards, with the uncertainty
+// propagated through the covariance.
 struct FitComponent
 {
     std::string label;   // user-visible, e.g. "Peak 1"
     ShapeKind shape = ShapeKind::Gaussian;
     std::string formula; // only used when shape == ShapeKind::Custom
 
-    FitParameter yield;                   // counts in the fit range
+    FitParameter amplitude;               // density at the reference point
     std::vector<FitParameter> parameters; // the shape's parameters, in order
 };
 

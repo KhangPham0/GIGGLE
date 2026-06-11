@@ -1,5 +1,6 @@
 #include "App.h"
 
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 
@@ -20,7 +21,8 @@ static void GlfwErrorCallback(int error, const char* description)
     std::fprintf(stderr, "GLFW error %d: %s\n", error, description);
 }
 
-App::App(SourceFactory openSource) : m_openSource(std::move(openSource))
+App::App(SourceFactory openSource, std::unique_ptr<FitEngine> fitEngine)
+    : m_openSource(std::move(openSource)), m_fitEngine(std::move(fitEngine))
 {
 }
 
@@ -144,6 +146,8 @@ void App::DrawFrame()
         m_needDefaultLayout = false;
     }
 
+    PollFit();
+
     FileTreeAction action = m_fileTreePanel.Draw(m_selectedHistogram);
     if (action.openFileRequested)
     {
@@ -156,8 +160,25 @@ void App::DrawFrame()
 
     m_plotPanel.Draw(m_histogram.has_value() ? &m_histogram.value() : nullptr,
                      &m_model, m_theme, m_fonts.mono);
-    m_fitModelPanel.Draw(m_model, m_histogram.has_value(), m_fonts.mono);
-    m_resultsPanel.Draw();
+
+    FitPanelAction fitAction = m_fitModelPanel.Draw(m_model,
+                                                    m_histogram.has_value() ? &m_histogram.value() : nullptr,
+                                                    FitRunning(), m_preFitModel.has_value(),
+                                                    m_theme, m_fonts.mono);
+    if (fitAction.fitRequested)
+    {
+        StartFit();
+    }
+    if (fitAction.revertRequested && m_preFitModel.has_value())
+    {
+        m_model = m_preFitModel.value();
+        m_preFitModel.reset();
+        m_fitResult.reset();
+    }
+
+    m_resultsPanel.Draw(m_fitResult.has_value() ? &m_fitResult.value() : nullptr,
+                        m_histogram.has_value() ? &m_histogram.value() : nullptr,
+                        &m_model, m_theme, m_fonts.mono);
 
     DrawErrorPopup();
 }
@@ -256,6 +277,38 @@ void App::LoadHistogram(const std::string& path)
     catch (const std::exception& error)
     {
         m_errorMessage = error.what();
+    }
+}
+
+void App::StartFit()
+{
+    if (FitRunning() || !m_histogram.has_value())
+    {
+        return;
+    }
+
+    m_preFitModel = m_model;
+    m_fitResult.reset();
+
+    // The worker gets copies; the engine never touches live UI state.
+    m_fitFuture = std::async(std::launch::async,
+                             [engine = m_fitEngine.get(), histogram = m_histogram.value(),
+                              model = m_model]() { return engine->Fit(histogram, model); });
+}
+
+void App::PollFit()
+{
+    if (!m_fitFuture.valid()
+        || m_fitFuture.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+    {
+        return;
+    }
+
+    m_fitResult = m_fitFuture.get();
+    if (m_fitResult->converged)
+    {
+        // The panel and the preview curves now show the fitted model.
+        ApplyFitResult(m_fitResult.value(), m_model);
     }
 }
 

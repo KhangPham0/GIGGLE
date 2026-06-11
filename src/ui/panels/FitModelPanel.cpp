@@ -1,9 +1,12 @@
 #include "FitModelPanel.h"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 
 #include "imgui.h"
+
+#include "core/Shapes.h"
 
 namespace giggle {
 
@@ -32,30 +35,52 @@ std::string NextPeakLabel(const std::vector<FitComponent>& peaks)
     return "Peak " + std::to_string(highest + 1);
 }
 
-FitComponent MakeDefaultPeak(const FitRange& range, const std::string& label)
+// The tallest bin within the range: the natural scale for new amplitudes.
+double MaxCountsInRange(const HistogramData& histogram, const FitRange& range)
 {
+    double best = 0.0;
+    for (int bin = 0; bin < histogram.BinCount(); ++bin)
+    {
+        double center = 0.5 * (histogram.binEdges[bin] + histogram.binEdges[bin + 1]);
+        if (center >= range.min && center <= range.max)
+        {
+            best = std::max(best, histogram.counts[bin]);
+        }
+    }
+    return best;
+}
+
+FitComponent MakeDefaultPeak(const FitRange& range, const HistogramData& histogram,
+                             const std::string& label)
+{
+    double mean = (range.min + range.max) / 2.0;
+    double height = std::max(MaxCountsInRange(histogram, range) * 0.5, 1.0);
+
     FitComponent peak;
     peak.label = label;
     peak.shape = ShapeKind::Gaussian;
-    peak.yield = { "yield", 100.0, false, 0.0, std::nullopt };
+    peak.amplitude = { "amplitude", height / BinWidthAt(histogram, mean), false, 0.0, std::nullopt };
     peak.parameters = {
-        { "mean", (range.min + range.max) / 2.0, false, std::nullopt, std::nullopt },
+        { "mean", mean, false, std::nullopt, std::nullopt },
         { "sigma", (range.max - range.min) / 40.0, false, std::nullopt, std::nullopt },
     };
     return peak;
 }
 
-FitComponent MakeDefaultBackground(ShapeKind shape, const FitRange& range)
+FitComponent MakeDefaultBackground(ShapeKind shape, const FitRange& range,
+                                   const HistogramData& histogram)
 {
+    double center = (range.min + range.max) / 2.0;
+    double level = std::max(MaxCountsInRange(histogram, range) * 0.2, 1.0);
+
     FitComponent background;
     background.label = "Background";
     background.shape = shape;
-    background.yield = { "yield", 100.0, false, 0.0, std::nullopt };
+    background.amplitude = { "amplitude", level / BinWidthAt(histogram, center), false, 0.0, std::nullopt };
     for (const std::string& name : ShapeParameterNames(shape))
     {
         background.parameters.push_back({ name, 0.0, false, std::nullopt, std::nullopt });
     }
-    (void)range;
     return background;
 }
 
@@ -69,26 +94,60 @@ float DragSpeedFor(double value)
 
 } // namespace
 
-void FitModelPanel::Draw(FitModel& model, bool enabled, ImFont* monoFont)
+FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogram,
+                                   bool fitRunning, bool canRevert, const Theme& theme,
+                                   ImFont* monoFont)
 {
+    FitPanelAction action;
+
     if (ImGui::Begin(Title))
     {
-        if (!enabled)
+        if (histogram == nullptr)
         {
             ImGui::TextDisabled("Open a histogram to build a fit.");
         }
         else
         {
-            DrawRangeSection(model, monoFont);
-            DrawPeaksSection(model, monoFont);
-            DrawBackgroundSection(model, monoFont);
+            DrawRangeSection(model, *histogram, monoFont);
+            DrawPeaksSection(model, *histogram, monoFont);
+            DrawBackgroundSection(model, *histogram, monoFont);
             DrawStatisticSection(model);
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            bool fittable = (!model.peaks.empty() || !model.background.empty())
+                            && model.range.max > model.range.min;
+
+            ImGui::BeginDisabled(fitRunning || !fittable);
+            ImGui::PushStyleColor(ImGuiCol_Button, theme.accent);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, theme.accentHover);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, theme.accentActive);
+            ImGui::PushStyleColor(ImGuiCol_Text, theme.windowBackground);
+            if (ImGui::Button(fitRunning ? "Fitting..." : "Fit", ImVec2(-1.0f, 0.0f)))
+            {
+                action.fitRequested = true;
+            }
+            ImGui::PopStyleColor(4);
+            ImGui::EndDisabled();
+
+            if (canRevert)
+            {
+                if (ImGui::Button("Revert to pre-fit", ImVec2(-1.0f, 0.0f)))
+                {
+                    action.revertRequested = true;
+                }
+            }
         }
     }
     ImGui::End();
+
+    return action;
 }
 
-void FitModelPanel::DrawRangeSection(FitModel& model, ImFont* monoFont)
+void FitModelPanel::DrawRangeSection(FitModel& model, const HistogramData& histogram,
+                                     ImFont* monoFont)
 {
     if (!ImGui::CollapsingHeader("Fit Range", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -98,16 +157,24 @@ void FitModelPanel::DrawRangeSection(FitModel& model, ImFont* monoFont)
     ImGui::PushFont(monoFont, 0.0f);
     float fieldWidth = ImGui::GetContentRegionAvail().x * 0.4f;
 
+    bool edited = false;
     ImGui::SetNextItemWidth(fieldWidth);
-    ImGui::DragScalar("##range_min", ImGuiDataType_Double, &model.range.min,
-                      DragSpeedFor(model.range.max - model.range.min), nullptr, nullptr, "%.6g");
+    edited |= ImGui::DragScalar("##range_min", ImGuiDataType_Double, &model.range.min,
+                                DragSpeedFor(model.range.max - model.range.min), nullptr, nullptr, "%.6g");
     ImGui::SameLine();
     ImGui::TextUnformatted("to");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(fieldWidth);
-    ImGui::DragScalar("##range_max", ImGuiDataType_Double, &model.range.max,
-                      DragSpeedFor(model.range.max - model.range.min), nullptr, nullptr, "%.6g");
+    edited |= ImGui::DragScalar("##range_max", ImGuiDataType_Double, &model.range.max,
+                                DragSpeedFor(model.range.max - model.range.min), nullptr, nullptr, "%.6g");
     ImGui::PopFont();
+
+    // The fit works on whole bins, so the range the user sees is the range
+    // the fit will really use.
+    if (edited)
+    {
+        model.range = SnapRangeToBinEdges(histogram, model.range);
+    }
 
     if (model.range.max <= model.range.min)
     {
@@ -115,7 +182,8 @@ void FitModelPanel::DrawRangeSection(FitModel& model, ImFont* monoFont)
     }
 }
 
-void FitModelPanel::DrawPeaksSection(FitModel& model, ImFont* monoFont)
+void FitModelPanel::DrawPeaksSection(FitModel& model, const HistogramData& histogram,
+                                     ImFont* monoFont)
 {
     if (!ImGui::CollapsingHeader("Peaks", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -134,7 +202,7 @@ void FitModelPanel::DrawPeaksSection(FitModel& model, ImFont* monoFont)
         ImGui::PushID(static_cast<int>(i));
 
         ImGui::SeparatorText(peak.label.c_str());
-        if (DrawParameterRow(peak.yield, "yield", monoFont)) {}
+        DrawAmplitudeRow(peak, histogram, "height", monoFont);
         for (FitParameter& parameter : peak.parameters)
         {
             DrawParameterRow(parameter, parameter.name.c_str(), monoFont);
@@ -154,11 +222,12 @@ void FitModelPanel::DrawPeaksSection(FitModel& model, ImFont* monoFont)
     ImGui::Spacing();
     if (ImGui::Button("Add Peak", ImVec2(-1.0f, 0.0f)))
     {
-        model.peaks.push_back(MakeDefaultPeak(model.range, NextPeakLabel(model.peaks)));
+        model.peaks.push_back(MakeDefaultPeak(model.range, histogram, NextPeakLabel(model.peaks)));
     }
 }
 
-void FitModelPanel::DrawBackgroundSection(FitModel& model, ImFont* monoFont)
+void FitModelPanel::DrawBackgroundSection(FitModel& model, const HistogramData& histogram,
+                                          ImFont* monoFont)
 {
     if (!ImGui::CollapsingHeader("Background", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -181,7 +250,7 @@ void FitModelPanel::DrawBackgroundSection(FitModel& model, ImFont* monoFont)
             if (ImGui::Selectable(ShapeKindName(shape), selected) && !selected)
             {
                 model.background.clear();
-                model.background.push_back(MakeDefaultBackground(shape, model.range));
+                model.background.push_back(MakeDefaultBackground(shape, model.range, histogram));
             }
         }
         ImGui::EndCombo();
@@ -191,7 +260,7 @@ void FitModelPanel::DrawBackgroundSection(FitModel& model, ImFont* monoFont)
     {
         FitComponent& background = model.background.front();
         ImGui::PushID("background");
-        DrawParameterRow(background.yield, "yield", monoFont);
+        DrawAmplitudeRow(background, histogram, "level", monoFont);
         for (FitParameter& parameter : background.parameters)
         {
             DrawParameterRow(parameter, parameter.name.c_str(), monoFont);
@@ -213,6 +282,54 @@ void FitModelPanel::DrawStatisticSection(FitModel& model)
     {
         model.statistic = current == 0 ? FitStatistic::ChiSquare : FitStatistic::PoissonLikelihood;
     }
+}
+
+// The amplitude is a real fit parameter, displayed in plot units: the
+// component's counts per bin at its reference point ("height" of a peak,
+// "level" of a background). The conversion is the local bin width -- a
+// constant -- so the fix checkbox and future bounds act on exactly what
+// the user sees.
+void FitModelPanel::DrawAmplitudeRow(FitComponent& component, const HistogramData& histogram,
+                                     const char* label, ImFont* monoFont)
+{
+    // The reference position: "mean" for peaks; backgrounds use any bin
+    // width (uniform in practice), so the first bin is fine.
+    double position = histogram.XMin();
+    for (const FitParameter& parameter : component.parameters)
+    {
+        if (parameter.name == "mean")
+        {
+            position = parameter.value;
+            break;
+        }
+    }
+    double binWidth = BinWidthAt(histogram, position);
+
+    double display = component.amplitude.value * binWidth;
+
+    ImGui::PushID(label);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("In counts, as read off the plot.");
+    }
+
+    float checkboxWidth = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x;
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.35f);
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - checkboxWidth - 40.0f);
+    ImGui::PushFont(monoFont, 0.0f);
+    if (ImGui::DragScalar("##value", ImGuiDataType_Double, &display,
+                          DragSpeedFor(display), nullptr, nullptr, "%.6g"))
+    {
+        component.amplitude.value = display / binWidth;
+    }
+    ImGui::PopFont();
+
+    ImGui::SameLine();
+    ImGui::Checkbox("fix", &component.amplitude.fixed);
+
+    ImGui::PopID();
 }
 
 bool FitModelPanel::DrawParameterRow(FitParameter& parameter, const char* id, ImFont* monoFont)

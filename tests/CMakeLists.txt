@@ -9,3 +9,10 @@ add_executable(rootbridge_tests rootbridge_tests.cpp)
 target_link_libraries(rootbridge_tests PRIVATE giggle_rootbridge doctest::doctest ROOT::Hist ROOT::RIO)
 
 add_test(NAME rootbridge_tests COMMAND rootbridge_tests)
+
+# The fit engine tests include a many-toy calibration study, so this is the
+# slowest test target (a few seconds).
+add_executable(fit_engine_tests fit_engine_tests.cpp)
+target_link_libraries(fit_engine_tests PRIVATE giggle_rootbridge doctest::doctest ROOT::Hist)
+
+add_test(NAME fit_engine_tests COMMAND fit_engine_tests)

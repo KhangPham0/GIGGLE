@@ -4,10 +4,11 @@
 # fails to compile.
 add_library(giggle_rootbridge STATIC
     RootFileSource.cpp
+    RootFitEngine.cpp
 )
 
 target_include_directories(giggle_rootbridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(giggle_rootbridge
     PUBLIC giggle_core
-    PRIVATE ROOT::Core ROOT::RIO ROOT::Hist
+    PRIVATE ROOT::Core ROOT::RIO ROOT::Hist ROOT::MathCore
 )

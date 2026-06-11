@@ -24,7 +24,7 @@ public:
 
 private:
     void DrawHistogram(const HistogramData& histogram, const Theme& theme);
-    void DrawModelOverlay(const FitModel& model, const Theme& theme);
+    void DrawModelOverlay(const FitModel& model, const HistogramData& histogram, const Theme& theme);
 
     std::string m_lastDrawnName; // to refit the axes when the histogram changes
 };

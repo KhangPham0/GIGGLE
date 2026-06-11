@@ -8,13 +8,16 @@
 #include <string>
 
 #include "rootbridge/RootFileSource.h"
+#include "rootbridge/RootFitEngine.h"
 #include "ui/App.h"
 
 int main(int argc, char** argv)
 {
-    giggle::App app([](const std::string& filePath) -> std::unique_ptr<giggle::SpectrumSource> {
-        return std::make_unique<giggle::RootFileSource>(filePath);
-    });
+    giggle::App app(
+        [](const std::string& filePath) -> std::unique_ptr<giggle::SpectrumSource> {
+            return std::make_unique<giggle::RootFileSource>(filePath);
+        },
+        std::make_unique<giggle::RootFitEngine>());
 
     // Optionally open a file straight away: giggle path/to/file.root
     if (argc > 1)
