@@ -20,6 +20,10 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC imgui imgui/backends)
 target_link_libraries(imgui PUBLIC glfw)
 
+# nfd: native open/save file dialogs.
+set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(nfd)
+
 # nlohmann_json: JSON serialization.
 set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
 add_subdirectory(json)

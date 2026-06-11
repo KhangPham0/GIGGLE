@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
 project(giggle VERSION 0.1.0 LANGUAGES C CXX)
 
+# The file dialog library (nfd) uses Objective-C on macOS.
+if(APPLE)
+    enable_language(OBJC)
+endif()
+
 # C++17 to match the standard of the ROOT builds we will link against.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,11 +33,14 @@ endif()
 find_package(ROOT 6.30 REQUIRED)
 
 # A ROOT built with a different C++ standard than this project can produce
-# link or runtime errors that are hard to diagnose; refuse early instead.
+# link or runtime errors that are hard to diagnose. Warn early and say how
+# to fix it, but let the build proceed.
 if(DEFINED ROOT_CXX_STANDARD AND NOT ROOT_CXX_STANDARD STREQUAL CMAKE_CXX_STANDARD)
-    message(FATAL_ERROR
-        "ROOT was built with C++${ROOT_CXX_STANDARD} but this project uses "
-        "C++${CMAKE_CXX_STANDARD}. Set CMAKE_CXX_STANDARD to match.")
+    message(WARNING
+        "ROOT was built with C++${ROOT_CXX_STANDARD} but this project is set "
+        "to C++${CMAKE_CXX_STANDARD}. If the build or the application "
+        "misbehaves, change the set(CMAKE_CXX_STANDARD ...) line near the "
+        "top of CMakeLists.txt in the project root to ${ROOT_CXX_STANDARD}.")
 endif()
 
 add_subdirectory(vendor)

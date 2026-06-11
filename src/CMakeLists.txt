@@ -17,5 +17,6 @@ target_include_directories(giggle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 find_package(OpenGL REQUIRED)
 
-# implot links imgui publicly, so imgui's headers and library come with it.
-target_link_libraries(giggle PRIVATE implot OpenGL::GL)
+# implot links imgui publicly, so imgui's headers and library come with it,
+# and giggle_rootbridge brings giggle_core the same way.
+target_link_libraries(giggle PRIVATE giggle_rootbridge implot nfd OpenGL::GL)
