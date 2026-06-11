@@ -88,6 +88,9 @@ std::vector<std::string> ShapeParameterNames(ShapeKind kind);
 const char* FitStatisticName(FitStatistic statistic);
 std::optional<FitStatistic> FitStatisticFromName(const std::string& name);
 
+// "Peak <n>" with n above every number already used by the given peaks.
+std::string NextPeakLabel(const std::vector<FitComponent>& peaks);
+
 } // namespace giggle
 
 #endif

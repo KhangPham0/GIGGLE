@@ -1,5 +1,7 @@
 #include "PlotPanel.h"
 
+#include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include "imgui.h"
@@ -9,25 +11,87 @@
 
 namespace giggle {
 
-void PlotPanel::Draw(const HistogramData* histogram, const FitModel* model,
-                     const Theme& theme, ImFont* monoFont)
+namespace {
+
+// Half width at half maximum, in x-units, for the shapes that have one.
+double HalfWidthAtHalfMax(const FitComponent& peak)
 {
+    if (peak.parameters.size() < 2)
+    {
+        return 0.0;
+    }
+    switch (peak.shape)
+    {
+        case ShapeKind::Gaussian:
+            return 1.177410023 * std::abs(peak.parameters[1].value); // sqrt(2 ln 2) sigma
+        case ShapeKind::Lorentzian:
+            return std::abs(peak.parameters[1].value); // gamma
+        default:
+            return 0.0;
+    }
+}
+
+void SetHalfWidthAtHalfMax(FitComponent& peak, double halfWidth)
+{
+    if (peak.parameters.size() < 2 || halfWidth <= 0.0)
+    {
+        return;
+    }
+    switch (peak.shape)
+    {
+        case ShapeKind::Gaussian:
+            peak.parameters[1].value = halfWidth / 1.177410023;
+            break;
+        case ShapeKind::Lorentzian:
+            peak.parameters[1].value = halfWidth;
+            break;
+        default:
+            break;
+    }
+}
+
+// The parameter named "mean", or nullptr.
+FitParameter* MeanParameter(FitComponent& component)
+{
+    for (FitParameter& parameter : component.parameters)
+    {
+        if (parameter.name == "mean")
+        {
+            return &parameter;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
+                           const Theme& theme, ImFont* monoFont)
+{
+    PlotAction action;
+
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::Begin(Title))
     {
         if (histogram != nullptr && histogram->name != m_lastDrawnName)
         {
-            ImPlot::SetNextAxesToFit();
+            m_requestAxesFit = true;
             m_lastDrawnName = histogram->name;
+        }
+        if (m_requestAxesFit)
+        {
+            ImPlot::SetNextAxesToFit();
+            m_requestAxesFit = false;
         }
 
         // "###" keeps the plot's ID stable while the visible title changes.
         std::string plotTitle = (histogram != nullptr ? histogram->name : "") + "###spectrum";
 
         ImGui::PushFont(monoFont, 13.0f);
-        if (ImPlot::BeginPlot(plotTitle.c_str(), ImVec2(-1.0f, -1.0f)))
+        if (ImPlot::BeginPlot(plotTitle.c_str(), ImVec2(-1.0f, -1.0f), ImPlotFlags_NoMenus))
         {
             ImPlot::SetupAxes(nullptr, "counts");
+            ImPlot::SetupAxisScale(ImAxis_Y1, m_logScaleY ? ImPlotScale_Log10 : ImPlotScale_Linear);
 
             if (histogram != nullptr)
             {
@@ -35,15 +99,43 @@ void PlotPanel::Draw(const HistogramData* histogram, const FitModel* model,
             }
             if (model != nullptr && histogram != nullptr)
             {
-                DrawModelOverlay(*model, *histogram, theme);
+                DrawRangeTools(*model, *histogram, theme);
+                DrawModelCurves(*model, *histogram, theme);
+                DrawPeakHandles(*model, *histogram, theme);
+                DrawBackgroundHandles(*model, *histogram, theme);
+                HandleAddPeakClick(action);
+
+                // A right click (not a right drag, which is box zoom)
+                // requests the context menu. The popup itself must be
+                // opened and drawn outside the plot: inside it, the plot's
+                // ID is on the stack and the popup IDs would not match.
+                ImVec2 rightDrag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Right);
+                if (ImPlot::IsPlotHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right)
+                    && rightDrag.x == 0.0f && rightDrag.y == 0.0f)
+                {
+                    m_contextMenuX = ImPlot::GetPlotMousePos().x;
+                    m_openContextMenu = true;
+                }
             }
 
             ImPlot::EndPlot();
         }
         ImGui::PopFont();
+
+        if (model != nullptr && histogram != nullptr)
+        {
+            if (m_openContextMenu)
+            {
+                ImGui::OpenPopup("##plot_context");
+                m_openContextMenu = false;
+            }
+            DrawContextMenu(*model, *histogram, action);
+        }
     }
     ImGui::End();
     ImGui::PopStyleVar();
+
+    return action;
 }
 
 void PlotPanel::DrawHistogram(const HistogramData& histogram, const Theme& theme)
@@ -67,23 +159,48 @@ void PlotPanel::DrawHistogram(const HistogramData& histogram, const Theme& theme
     ImPlot::PlotStairs("##data_line", xs.data(), ys.data(), pointCount, lineSpec);
 }
 
-void PlotPanel::DrawModelOverlay(const FitModel& model, const HistogramData& histogram,
-                                 const Theme& theme)
+void PlotPanel::DrawRangeTools(FitModel& model, const HistogramData& histogram, const Theme& theme)
 {
-    bool hasComponents = !model.peaks.empty() || !model.background.empty();
-    bool hasRange = model.range.max > model.range.min;
-    if (!hasRange)
+    if (model.range.max <= model.range.min)
     {
         return;
     }
 
-    // The fit range edges.
-    double rangeEdges[2] = { model.range.min, model.range.max };
-    ImPlotSpec rangeSpec;
-    rangeSpec.LineColor = ImVec4(theme.accent.x, theme.accent.y, theme.accent.z, 0.45f);
-    ImPlot::PlotInfLines("##fit_range", rangeEdges, 2, rangeSpec);
+    // A soft shade over the fit region.
+    ImPlotRect limits = ImPlot::GetPlotLimits();
+    ImVec2 topLeft = ImPlot::PlotToPixels(model.range.min, limits.Y.Max);
+    ImVec2 bottomRight = ImPlot::PlotToPixels(model.range.max, limits.Y.Min);
+    ImVec4 shade = theme.accent;
+    shade.w = 0.05f;
+    ImPlot::PushPlotClipRect();
+    ImPlot::GetPlotDrawList()->AddRectFilled(topLeft, bottomRight,
+                                             ImGui::ColorConvertFloat4ToU32(shade));
+    ImPlot::PopPlotClipRect();
 
-    if (!hasComponents)
+    // Draggable edges, snapping to bin edges like every other range edit.
+    ImVec4 edgeColor = theme.accent;
+    edgeColor.w = 0.6f;
+    bool moved = false;
+    moved |= ImPlot::DragLineX(9001, &model.range.min, edgeColor, 1.5f);
+    moved |= ImPlot::DragLineX(9002, &model.range.max, edgeColor, 1.5f);
+    if (moved)
+    {
+        if (model.range.max < model.range.min)
+        {
+            std::swap(model.range.min, model.range.max);
+        }
+        model.range = SnapRangeToBinEdges(histogram, model.range);
+    }
+}
+
+void PlotPanel::DrawModelCurves(const FitModel& model, const HistogramData& histogram,
+                                const Theme& theme)
+{
+    if (model.peaks.empty() && model.background.empty())
+    {
+        return;
+    }
+    if (model.range.max <= model.range.min)
     {
         return;
     }
@@ -127,6 +244,198 @@ void PlotPanel::DrawModelOverlay(const FitModel& model, const HistogramData& his
     totalSpec.LineColor = theme.fitCurve;
     totalSpec.LineWeight = 2.2f;
     ImPlot::PlotLine("Model", curves.x.data(), curves.total.data(), pointCount, totalSpec);
+}
+
+void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram, const Theme& theme)
+{
+    for (size_t i = 0; i < model.peaks.size(); ++i)
+    {
+        FitComponent& peak = model.peaks[i];
+        FitParameter* mean = MeanParameter(peak);
+        if (mean == nullptr)
+        {
+            continue;
+        }
+
+        ImVec4 color = theme.ComponentColor(i);
+        double binWidth = BinWidthAt(histogram, mean->value);
+        int baseId = 100 + static_cast<int>(i) * 10;
+
+        // The apex: drag horizontally to move the mean, vertically to set
+        // the height.
+        double apexX = mean->value;
+        double apexY = peak.amplitude.value * binWidth;
+        if (ImPlot::DragPoint(baseId, &apexX, &apexY, color, 6.0f))
+        {
+            mean->value = apexX;
+            if (apexY > 0.0)
+            {
+                peak.amplitude.value = apexY / binWidth;
+            }
+        }
+
+        // Two half-maximum handles: drag horizontally to set the width.
+        double halfWidth = HalfWidthAtHalfMax(peak);
+        if (halfWidth > 0.0)
+        {
+            double halfY = 0.5 * peak.amplitude.value * binWidth;
+
+            double leftX = mean->value - halfWidth;
+            double leftY = halfY;
+            if (ImPlot::DragPoint(baseId + 1, &leftX, &leftY, color, 4.0f))
+            {
+                SetHalfWidthAtHalfMax(peak, std::abs(mean->value - leftX));
+            }
+
+            double rightX = mean->value + halfWidth;
+            double rightY = halfY;
+            if (ImPlot::DragPoint(baseId + 2, &rightX, &rightY, color, 4.0f))
+            {
+                SetHalfWidthAtHalfMax(peak, std::abs(rightX - mean->value));
+            }
+        }
+    }
+}
+
+void PlotPanel::DrawBackgroundHandles(FitModel& model, const HistogramData& histogram,
+                                      const Theme& theme)
+{
+    if (model.range.max <= model.range.min)
+    {
+        return;
+    }
+    double pivot = RangePivot(model.range);
+
+    for (size_t i = 0; i < model.background.size(); ++i)
+    {
+        FitComponent& background = model.background[i];
+        ImVec4 color = theme.ComponentColor(model.peaks.size() + i);
+        double binWidth = BinWidthAt(histogram, pivot);
+        int baseId = 500 + static_cast<int>(i) * 10;
+
+        // The level handle, at the pivot: drag vertically.
+        double levelX = pivot;
+        double levelY = background.amplitude.value * binWidth;
+        if (ImPlot::DragPoint(baseId, &levelX, &levelY, color, 5.0f))
+        {
+            if (levelY > 0.0)
+            {
+                background.amplitude.value = levelY / binWidth;
+            }
+        }
+
+        // A second handle right of the pivot tilts the shape, when it has
+        // a slope to tilt.
+        if (background.parameters.empty() || background.parameters[0].name != "slope")
+        {
+            continue;
+        }
+        FitParameter& slope = background.parameters[0];
+
+        double offset = 0.3 * (model.range.max - model.range.min);
+        double tiltX = pivot + offset;
+        double tiltY = ComponentDensity(background, model.range, tiltX) * binWidth;
+        if (ImPlot::DragPoint(baseId + 1, &tiltX, &tiltY, color, 4.0f))
+        {
+            double level = background.amplitude.value;
+            if (level > 0.0 && tiltY > 0.0)
+            {
+                double ratio = tiltY / (binWidth * level);
+                switch (background.shape)
+                {
+                    case ShapeKind::Linear:
+                        slope.value = (ratio - 1.0) / offset;
+                        break;
+                    case ShapeKind::Quadratic:
+                    {
+                        double curvature = background.parameters.size() > 1
+                                               ? background.parameters[1].value
+                                               : 0.0;
+                        slope.value = (ratio - 1.0 - curvature * offset * offset) / offset;
+                        break;
+                    }
+                    case ShapeKind::Exponential:
+                        slope.value = std::log(ratio) / offset;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+    }
+}
+
+void PlotPanel::HandleAddPeakClick(PlotAction& action)
+{
+    // Escape leaves the persistent add-peak mode.
+    if (m_addPeakMode && ImGui::IsKeyPressed(ImGuiKey_Escape))
+    {
+        m_addPeakMode = false;
+    }
+
+    bool wantAdd = m_addPeakMode || ImGui::IsKeyDown(ImGuiKey_P);
+    if (!wantAdd || !ImPlot::IsPlotHovered())
+    {
+        return;
+    }
+
+    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    ImGui::SetTooltip(m_addPeakMode ? "click to add a peak (Esc to stop)"
+                                    : "click to add a peak");
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    {
+        action.addPeakAt = ImPlot::GetPlotMousePos().x;
+    }
+}
+
+void PlotPanel::DrawContextMenu(FitModel& model, const HistogramData& histogram, PlotAction& action)
+{
+    if (!ImGui::BeginPopup("##plot_context"))
+    {
+        return;
+    }
+
+    if (ImGui::MenuItem("Add peak here"))
+    {
+        action.addPeakAt = m_contextMenuX;
+    }
+    if (ImGui::MenuItem("Set range start here"))
+    {
+        model.range.min = m_contextMenuX;
+        if (model.range.max <= model.range.min)
+        {
+            model.range.max = histogram.XMax();
+        }
+        model.range = SnapRangeToBinEdges(histogram, model.range);
+    }
+    if (ImGui::MenuItem("Set range end here"))
+    {
+        model.range.max = m_contextMenuX;
+        if (model.range.max <= model.range.min)
+        {
+            model.range.min = histogram.XMin();
+        }
+        model.range = SnapRangeToBinEdges(histogram, model.range);
+    }
+    ImGui::Separator();
+    ImGui::MenuItem("Add peaks on click", nullptr, &m_addPeakMode);
+    ImGui::MenuItem("Log scale Y", nullptr, &m_logScaleY);
+    if (ImGui::MenuItem("Autoscale axes"))
+    {
+        m_requestAxesFit = true;
+    }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Fit", "F"))
+    {
+        action.fitRequested = true;
+    }
+
+    ImGui::Separator();
+    ImGui::TextDisabled("right-drag: box zoom (Shift: x only)");
+    ImGui::TextDisabled("scroll: zoom   double-click: autoscale");
+    ImGui::TextDisabled("hold P + click: add peak");
+
+    ImGui::EndPopup();
 }
 
 } // namespace giggle

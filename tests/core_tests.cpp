@@ -460,6 +460,54 @@ TEST_CASE("results export carries warnings, the cross-check, and a CSV table")
     CHECK(lines == 3);
 }
 
+TEST_CASE("a clicked peak is guessed from the data around the click")
+{
+    // A clean Gaussian on a flat shelf: 400 counts tall at x = 50 with
+    // sigma 3, over a baseline of 50 counts per bin. Bin width 0.5.
+    HistogramData histogram;
+    const int binCount = 200;
+    for (int i = 0; i <= binCount; ++i)
+    {
+        histogram.binEdges.push_back(100.0 * i / binCount);
+    }
+    for (int i = 0; i < binCount; ++i)
+    {
+        double center = 0.5 * (histogram.binEdges[i] + histogram.binEdges[i + 1]);
+        double z = (center - 50.0) / 3.0;
+        histogram.counts.push_back(50.0 + 400.0 * std::exp(-0.5 * z * z));
+    }
+
+    FitRange range{ 30.0, 70.0 };
+
+    // A slightly off-center click still finds the peak.
+    FitComponent guess = SuggestGaussianPeak(histogram, range, 49.2);
+    CHECK(guess.shape == ShapeKind::Gaussian);
+    CHECK(guess.parameters[0].value == doctest::Approx(50.0).epsilon(0.02));
+    CHECK(guess.parameters[1].value == doctest::Approx(3.0).epsilon(0.35));
+    // Height above baseline, in density units: ~400 counts / 0.5 width.
+    CHECK(guess.amplitude.value == doctest::Approx(800.0).epsilon(0.15));
+    CHECK(guess.amplitude.lowerBound == 0.0);
+
+    // A click in flat background gives a small, sane guess instead of
+    // something absurd.
+    FitComponent flat = SuggestGaussianPeak(histogram, range, 35.0);
+    CHECK(flat.parameters[1].value >= 0.5);                       // at least a bin
+    CHECK(flat.parameters[1].value <= (range.max - range.min) / 4.0);
+}
+
+TEST_CASE("peak labels keep counting upward")
+{
+    std::vector<FitComponent> peaks;
+    CHECK(NextPeakLabel(peaks) == "Peak 1");
+
+    FitComponent peak;
+    peak.label = "Peak 1";
+    peaks.push_back(peak);
+    peak.label = "Peak 7";
+    peaks.push_back(peak);
+    CHECK(NextPeakLabel(peaks) == "Peak 8");
+}
+
 TEST_CASE("version is defined")
 {
     CHECK(std::string(Version()) != "");

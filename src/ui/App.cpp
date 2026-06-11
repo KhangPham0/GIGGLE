@@ -6,6 +6,7 @@
 #include <fstream>
 
 #include "core/Serialization.h"
+#include "core/Shapes.h"
 
 #include "imgui.h"
 #include "imgui_internal.h" // DockBuilder API, used for the default layout
@@ -17,11 +18,38 @@
 #define GL_SILENCE_DEPRECATION
 #include <GLFW/glfw3.h>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 namespace giggle {
 
 static void GlfwErrorCallback(int error, const char* description)
 {
     std::fprintf(stderr, "GLFW error %d: %s\n", error, description);
+}
+
+// The directory holding the running executable; the current directory as
+// a fallback. Keeps GIGGLE's own files (the window layout) next to the
+// binary, wherever it is launched from.
+static std::filesystem::path ExecutableDirectory()
+{
+#ifdef __APPLE__
+    char buffer[4096];
+    uint32_t size = sizeof(buffer);
+    if (_NSGetExecutablePath(buffer, &size) == 0)
+    {
+        return std::filesystem::weakly_canonical(buffer).parent_path();
+    }
+#else
+    std::error_code error;
+    std::filesystem::path self = std::filesystem::read_symlink("/proc/self/exe", error);
+    if (!error)
+    {
+        return self.parent_path();
+    }
+#endif
+    return std::filesystem::current_path();
 }
 
 App::App(SourceFactory openSource, std::unique_ptr<FitEngine> fitEngine)
@@ -119,9 +147,11 @@ bool App::Init()
     io.ConfigDpiScaleFonts = true;
     io.ConfigDpiScaleViewports = true;
 
-    // Build the default layout only when no saved layout exists from a
-    // previous run.
-    m_needDefaultLayout = !std::filesystem::exists(io.IniFilename);
+    // The layout file lives next to the executable, and the default layout
+    // is built only when no saved layout exists from a previous run.
+    m_layoutFilePath = (ExecutableDirectory() / "imgui.ini").string();
+    io.IniFilename = m_layoutFilePath.c_str();
+    m_needDefaultLayout = !std::filesystem::exists(m_layoutFilePath);
 
     ImGuiStyle& style = ImGui::GetStyle();
     style.ScaleAllSizes(scale);
@@ -140,6 +170,7 @@ bool App::Init()
 void App::DrawFrame()
 {
     DrawMainMenu();
+    HandleShortcuts();
 
     ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
@@ -151,50 +182,67 @@ void App::DrawFrame()
 
     PollFit();
 
-    FileTreeAction action = m_fileTreePanel.Draw(m_selectedHistogram);
-    if (action.openFileRequested)
+    if (m_showFileTree)
     {
-        OpenFileDialog();
-    }
-    if (action.histogramClicked.has_value())
-    {
-        LoadHistogram(action.histogramClicked.value());
+        FileTreeAction action = m_fileTreePanel.Draw(m_selectedHistogram);
+        if (action.openFileRequested)
+        {
+            OpenFileDialog();
+        }
+        if (action.histogramClicked.has_value())
+        {
+            LoadHistogram(action.histogramClicked.value());
+        }
     }
 
-    m_plotPanel.Draw(m_histogram.has_value() ? &m_histogram.value() : nullptr,
-                     &m_model, m_theme, m_fonts.mono);
-
-    FitPanelAction fitAction = m_fitModelPanel.Draw(m_model,
-                                                    m_histogram.has_value() ? &m_histogram.value() : nullptr,
-                                                    FitRunning(), m_preFitModel.has_value(),
-                                                    m_theme, m_fonts.mono);
-    if (fitAction.fitRequested)
+    PlotAction plotAction = m_plotPanel.Draw(m_histogram.has_value() ? &m_histogram.value() : nullptr,
+                                             &m_model, m_theme, m_fonts.mono);
+    if (plotAction.addPeakAt.has_value())
+    {
+        AddPeakAt(plotAction.addPeakAt.value());
+    }
+    if (plotAction.fitRequested)
     {
         StartFit();
     }
-    if (fitAction.revertRequested && m_preFitModel.has_value())
+
+    if (m_showFitModel)
     {
-        m_model = m_preFitModel.value();
-        m_preFitModel.reset();
-        m_fitResult.reset();
-        m_fittedModel.reset();
+        FitPanelAction fitAction = m_fitModelPanel.Draw(m_model,
+                                                        m_histogram.has_value() ? &m_histogram.value() : nullptr,
+                                                        FitRunning(), m_preFitModel.has_value(),
+                                                        m_theme, m_fonts.mono);
+        if (fitAction.fitRequested)
+        {
+            StartFit();
+        }
+        if (fitAction.revertRequested && m_preFitModel.has_value())
+        {
+            m_model = m_preFitModel.value();
+            m_preFitModel.reset();
+            m_fitResult.reset();
+            m_fittedModel.reset();
+        }
     }
 
-    ResultsAction resultsAction =
-        m_resultsPanel.Draw(m_fitResult.has_value() ? &m_fitResult.value() : nullptr,
-                            m_histogram.has_value() ? &m_histogram.value() : nullptr,
-                            &m_model, m_theme, m_fonts.mono);
-    if (resultsAction.saveJsonRequested)
+    if (m_showResults)
     {
-        SaveResults(false);
-    }
-    if (resultsAction.saveCsvRequested)
-    {
-        SaveResults(true);
-    }
-    if (resultsAction.copyCsvRequested)
-    {
-        CopyResultsCsv();
+        ResultsAction resultsAction =
+            m_resultsPanel.Draw(m_fitResult.has_value() ? &m_fitResult.value() : nullptr,
+                                m_histogram.has_value() ? &m_histogram.value() : nullptr,
+                                &m_model, m_theme, m_fonts.mono);
+        if (resultsAction.saveJsonRequested)
+        {
+            SaveResults(false);
+        }
+        if (resultsAction.saveCsvRequested)
+        {
+            SaveResults(true);
+        }
+        if (resultsAction.copyCsvRequested)
+        {
+            CopyResultsCsv();
+        }
     }
 
     DrawErrorPopup();
@@ -217,8 +265,57 @@ void App::DrawMainMenu()
             }
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("View"))
+        {
+            ImGui::MenuItem(FileTreePanel::Title, "Ctrl+B", &m_showFileTree);
+            ImGui::MenuItem(FitModelPanel::Title, "Ctrl+J", &m_showFitModel);
+            ImGui::MenuItem(ResultsPanel::Title, nullptr, &m_showResults);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reset layout"))
+            {
+                m_showFileTree = true;
+                m_showFitModel = true;
+                m_showResults = true;
+                m_needDefaultLayout = true;
+            }
+            ImGui::EndMenu();
+        }
         ImGui::EndMainMenuBar();
     }
+}
+
+void App::HandleShortcuts()
+{
+    // No shortcuts while the user is typing into a field. ImGui maps
+    // Ctrl to Cmd on macOS.
+    if (ImGui::GetIO().WantTextInput)
+    {
+        return;
+    }
+
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_B))
+    {
+        m_showFileTree = !m_showFileTree;
+    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_J))
+    {
+        m_showFitModel = !m_showFitModel;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_F, false))
+    {
+        StartFit();
+    }
+}
+
+void App::AddPeakAt(double x)
+{
+    if (!m_histogram.has_value())
+    {
+        return;
+    }
+    FitComponent peak = SuggestGaussianPeak(m_histogram.value(), m_model.range, x);
+    peak.label = NextPeakLabel(m_model.peaks);
+    m_model.peaks.push_back(peak);
 }
 
 void App::DrawErrorPopup()

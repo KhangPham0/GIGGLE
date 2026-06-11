@@ -44,6 +44,8 @@ private:
     bool Init();
     void DrawFrame();
     void DrawMainMenu();
+    void HandleShortcuts();
+    void AddPeakAt(double x);
     void DrawErrorPopup();
     void BuildDefaultLayout(unsigned int dockspaceId);
     void Shutdown();
@@ -66,6 +68,16 @@ private:
     // True until the default panel layout has been applied. Only used when
     // no saved layout (imgui.ini) exists.
     bool m_needDefaultLayout = false;
+
+    // The layout file lives next to the executable: GIGGLE keeps its files
+    // with itself instead of scattering them over the user's machine.
+    std::string m_layoutFilePath;
+
+    // Panel visibility; a hidden panel's dock space is reclaimed by the
+    // plot until it returns.
+    bool m_showFileTree = true;
+    bool m_showFitModel = true;
+    bool m_showResults = true;
 
     SourceFactory m_openSource;
     std::string m_startupFile;

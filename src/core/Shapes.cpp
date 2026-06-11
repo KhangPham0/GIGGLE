@@ -318,6 +318,75 @@ ValueWithError CountsInRange(const HistogramData& histogram, const FitRange& ran
     return total;
 }
 
+FitComponent SuggestGaussianPeak(const HistogramData& histogram, const FitRange& range, double x)
+{
+    const std::vector<double>& edges = histogram.binEdges;
+    int binCount = histogram.BinCount();
+
+    // The bins inside the fit range, and the clicked bin clamped into them.
+    auto binIndexOf = [&](double value) {
+        auto above = std::upper_bound(edges.begin(), edges.end(), value);
+        int bin = static_cast<int>(above - edges.begin()) - 1;
+        return std::min(std::max(bin, 0), binCount - 1);
+    };
+    int firstBin = binIndexOf(range.min);
+    int lastBin = binIndexOf(range.max);
+    int clickedBin = std::min(std::max(binIndexOf(x), firstBin), lastBin);
+
+    // The peak: the tallest bin within a few bins of the click.
+    int peakBin = clickedBin;
+    for (int bin = std::max(firstBin, clickedBin - 3);
+         bin <= std::min(lastBin, clickedBin + 3); ++bin)
+    {
+        if (histogram.counts[bin] > histogram.counts[peakBin])
+        {
+            peakBin = bin;
+        }
+    }
+    double mean = 0.5 * (edges[peakBin] + edges[peakBin + 1]);
+    double peakCounts = histogram.counts[peakBin];
+
+    // The local baseline: the smallest bin within a window around the peak.
+    int window = std::max(15, (lastBin - firstBin) / 8);
+    double baseline = peakCounts;
+    for (int bin = std::max(firstBin, peakBin - window);
+         bin <= std::min(lastBin, peakBin + window); ++bin)
+    {
+        baseline = std::min(baseline, histogram.counts[bin]);
+    }
+
+    // Sigma from a half-maximum scan away from the peak.
+    double halfMax = baseline + 0.5 * (peakCounts - baseline);
+    int left = peakBin;
+    while (left > firstBin && histogram.counts[left] > halfMax)
+    {
+        --left;
+    }
+    int right = peakBin;
+    while (right < lastBin && histogram.counts[right] > halfMax)
+    {
+        ++right;
+    }
+    double fwhm = 0.5 * (edges[right] + edges[right + 1]) - 0.5 * (edges[left] + edges[left + 1]);
+    double sigma = fwhm / 2.354820045;
+
+    // Keep the guess physical: at least a bin wide, at most a quarter of
+    // the range.
+    double binWidth = BinWidthAt(histogram, mean);
+    sigma = std::max(sigma, binWidth);
+    sigma = std::min(sigma, (range.max - range.min) / 4.0);
+
+    FitComponent peak;
+    peak.shape = ShapeKind::Gaussian;
+    peak.amplitude = { "amplitude", std::max(peakCounts - baseline, 1.0) / binWidth,
+                       false, 0.0, std::nullopt };
+    peak.parameters = {
+        { "mean", mean, false, std::nullopt, std::nullopt },
+        { "sigma", sigma, false, std::nullopt, std::nullopt },
+    };
+    return peak;
+}
+
 FitCurves SampleModelCurves(const FitModel& model, int pointCount,
                             const HistogramData* histogramForUnits)
 {

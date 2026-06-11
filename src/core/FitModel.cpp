@@ -1,5 +1,7 @@
 #include "FitModel.h"
 
+#include <cstdio>
+
 namespace giggle {
 
 namespace {
@@ -86,6 +88,20 @@ std::optional<FitStatistic> FitStatisticFromName(const std::string& name)
         return FitStatistic::PoissonLikelihood;
     }
     return std::nullopt;
+}
+
+std::string NextPeakLabel(const std::vector<FitComponent>& peaks)
+{
+    int highest = 0;
+    for (const FitComponent& peak : peaks)
+    {
+        int number = 0;
+        if (std::sscanf(peak.label.c_str(), "Peak %d", &number) == 1 && number > highest)
+        {
+            highest = number;
+        }
+    }
+    return "Peak " + std::to_string(highest + 1);
 }
 
 } // namespace giggle

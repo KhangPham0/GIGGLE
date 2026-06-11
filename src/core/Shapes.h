@@ -90,6 +90,12 @@ FitRange SnapRangeToBinEdges(const HistogramData& histogram, FitRange range);
 // the data.
 ValueWithError CountsInRange(const HistogramData& histogram, const FitRange& range);
 
+// A Gaussian peak guessed from the data around x: the mean from the
+// tallest nearby bin, the height from its contents above the local
+// baseline, and sigma from a half-maximum scan. Used by click-to-add and
+// by the Add Peak button.
+FitComponent SuggestGaussianPeak(const HistogramData& histogram, const FitRange& range, double x);
+
 // Samples every component and their sum across the fit range, for drawing.
 // Curves are ordered peaks first, then background, as in the model.
 //

@@ -20,21 +20,6 @@ const ShapeKind kBackgroundShapes[] = {
     ShapeKind::Quadratic,
 };
 
-// "Peak <n>" with n above every number already in use.
-std::string NextPeakLabel(const std::vector<FitComponent>& peaks)
-{
-    int highest = 0;
-    for (const FitComponent& peak : peaks)
-    {
-        int number = 0;
-        if (std::sscanf(peak.label.c_str(), "Peak %d", &number) == 1 && number > highest)
-        {
-            highest = number;
-        }
-    }
-    return "Peak " + std::to_string(highest + 1);
-}
-
 // The tallest bin within the range: the natural scale for new amplitudes.
 double MaxCountsInRange(const HistogramData& histogram, const FitRange& range)
 {
@@ -48,23 +33,6 @@ double MaxCountsInRange(const HistogramData& histogram, const FitRange& range)
         }
     }
     return best;
-}
-
-FitComponent MakeDefaultPeak(const FitRange& range, const HistogramData& histogram,
-                             const std::string& label)
-{
-    double mean = (range.min + range.max) / 2.0;
-    double height = std::max(MaxCountsInRange(histogram, range) * 0.5, 1.0);
-
-    FitComponent peak;
-    peak.label = label;
-    peak.shape = ShapeKind::Gaussian;
-    peak.amplitude = { "amplitude", height / BinWidthAt(histogram, mean), false, 0.0, std::nullopt };
-    peak.parameters = {
-        { "mean", mean, false, std::nullopt, std::nullopt },
-        { "sigma", (range.max - range.min) / 40.0, false, std::nullopt, std::nullopt },
-    };
-    return peak;
 }
 
 FitComponent MakeDefaultBackground(ShapeKind shape, const FitRange& range,
@@ -222,7 +190,14 @@ void FitModelPanel::DrawPeaksSection(FitModel& model, const HistogramData& histo
     ImGui::Spacing();
     if (ImGui::Button("Add Peak", ImVec2(-1.0f, 0.0f)))
     {
-        model.peaks.push_back(MakeDefaultPeak(model.range, histogram, NextPeakLabel(model.peaks)));
+        FitComponent peak = SuggestGaussianPeak(histogram, model.range,
+                                                (model.range.min + model.range.max) / 2.0);
+        peak.label = NextPeakLabel(model.peaks);
+        model.peaks.push_back(peak);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Tip: hold P and click a peak on the plot, or right-click it.");
     }
 }
 
