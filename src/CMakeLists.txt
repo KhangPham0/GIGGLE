@@ -1,4 +1,5 @@
 add_subdirectory(core)
+add_subdirectory(rootbridge)
 
 add_executable(giggle
     main.cpp
