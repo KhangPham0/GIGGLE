@@ -150,14 +150,14 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
 
     if (!HasUniformBins(data))
     {
-        check.detail = "skipped: variable bin widths";
+        check.detail = "this histogram has variable bin widths";
         return check;
     }
     for (const ComponentSlot& slot : slots)
     {
         if (slot.component->amplitude.fixed)
         {
-            check.detail = "skipped: a fixed amplitude has no TF1NormSum equivalent";
+            check.detail = "a fixed height cannot be mirrored in the verification fit";
             return check;
         }
     }
@@ -167,15 +167,18 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
     double pivot = RangePivot(range);
     int componentCount = static_cast<int>(slots.size());
 
-    // Our fitted counts per component, in model order.
+    // Our fitted counts and parameters per component, in model order.
     std::vector<ValueWithError> ourCounts;
+    std::vector<const ComponentResult*> ourComponents;
     for (const ComponentResult& peak : ours.peaks)
     {
         ourCounts.push_back(peak.counts);
+        ourComponents.push_back(&peak);
     }
     for (const ComponentResult& background : ours.background)
     {
         ourCounts.push_back(background.counts);
+        ourComponents.push_back(&background);
     }
 
     // One TF1 per component, built on the same core shape math. TF1NormSum
@@ -197,7 +200,7 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
             ("normsum_" + slot.component->label).c_str(), shapeOnly, range.min, range.max, shapeCount);
         for (int j = 0; j < shapeCount; ++j)
         {
-            function->SetParameter(j, slot.component->parameters[j].value);
+            function->SetParameter(j, ourComponents[i]->parameters[j].value);
         }
         shapePointers.push_back(function.get());
         shapes.push_back(std::move(function));
@@ -217,15 +220,19 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
     fitter.Config().SetMinimizer("Minuit2", "Migrad");
     fitter.SetFunction(wrapped, false);
 
+    // Mirror the model's constraints on the shape parameters, so a fit
+    // whose result legitimately sits on a bound is compared against a
+    // re-fit under the same rules rather than a freer one. Values start
+    // from our fitted solution.
     int shapeIndex = componentCount;
-    for (const ComponentSlot& slot : slots)
+    for (size_t slotIndex = 0; slotIndex < slots.size(); ++slotIndex)
     {
+        const ComponentSlot& slot = slots[slotIndex];
         for (int i = 0; i < slot.shapeCount; ++i)
         {
-            if (slot.component->parameters[i].fixed)
-            {
-                fitter.Config().ParSettings(shapeIndex).Fix();
-            }
+            ROOT::Fit::ParameterSettings& settings = fitter.Config().ParSettings(shapeIndex);
+            ConfigureParameter(settings, slot.component->parameters[i]);
+            settings.SetValue(ourComponents[slotIndex]->parameters[i].value);
             ++shapeIndex;
         }
     }
@@ -236,7 +243,7 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
     {
         check.performed = true;
         check.agreed = false;
-        check.detail = "the TF1NormSum cross-check fit did not converge";
+        check.detail = "the verification fit did not converge";
         return check;
     }
 

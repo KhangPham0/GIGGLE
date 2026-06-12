@@ -210,6 +210,89 @@ float DragSpeedFor(double value)
     return magnitude > 1e-12 ? static_cast<float>(magnitude * 0.005) : 0.01f;
 }
 
+// One optional bound inside the bounds popup: a checkbox to enable it and
+// a field to set it, working in display units (bound = display / scale).
+void DrawBoundField(const char* label, std::optional<double>& bound, double scale,
+                    double defaultDisplayValue)
+{
+    ImGui::PushID(label);
+
+    bool enabled = bound.has_value();
+    if (ImGui::Checkbox(label, &enabled))
+    {
+        if (enabled)
+        {
+            bound = defaultDisplayValue / scale;
+        }
+        else
+        {
+            bound.reset();
+        }
+    }
+
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.55f);
+    ImGui::BeginDisabled(!enabled);
+    double display = bound.has_value() ? bound.value() * scale : 0.0;
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::DragScalar("##bound", ImGuiDataType_Double, &display,
+                          DragSpeedFor(display), nullptr, nullptr, "%.6g")
+        && bound.has_value())
+    {
+        bound = display / scale;
+    }
+    ImGui::EndDisabled();
+
+    ImGui::PopID();
+}
+
+// The right-click popup on a value field, plus the hover hint showing the
+// bounds. Attached to the last drawn item. `scale` converts stored values
+// to display units (the bin width for amplitudes, 1 otherwise).
+void DrawBoundsPopup(FitParameter& parameter, double scale)
+{
+    if (ImGui::IsItemHovered() && (parameter.lowerBound.has_value() || parameter.upperBound.has_value()))
+    {
+        char text[96];
+        std::snprintf(text, sizeof(text), "bounds: %s%.6g, %.6g%s",
+                      parameter.lowerBound.has_value() ? "[" : "(",
+                      parameter.lowerBound.has_value() ? parameter.lowerBound.value() * scale
+                                                       : -INFINITY,
+                      parameter.upperBound.has_value() ? parameter.upperBound.value() * scale
+                                                       : INFINITY,
+                      parameter.upperBound.has_value() ? "]" : ")");
+        ImGui::SetTooltip("%s", text);
+    }
+
+    if (ImGui::BeginPopupContextItem("bounds"))
+    {
+        double value = parameter.value * scale;
+        DrawBoundField("lower bound", parameter.lowerBound, scale, value);
+        DrawBoundField("upper bound", parameter.upperBound, scale, value);
+        ImGui::EndPopup();
+    }
+}
+
+// The drag limits enforcing bounds while dragging. ImGui wants concrete
+// numbers, so missing sides fall back to huge ones.
+struct DragLimits
+{
+    double minimum;
+    double maximum;
+    const double* minimumPointer;
+    const double* maximumPointer;
+};
+
+DragLimits LimitsFor(const FitParameter& parameter, double scale)
+{
+    DragLimits limits;
+    limits.minimum = parameter.lowerBound.has_value() ? parameter.lowerBound.value() * scale : -1e300;
+    limits.maximum = parameter.upperBound.has_value() ? parameter.upperBound.value() * scale : 1e300;
+    bool bounded = parameter.lowerBound.has_value() || parameter.upperBound.has_value();
+    limits.minimumPointer = bounded ? &limits.minimum : nullptr;
+    limits.maximumPointer = bounded ? &limits.maximum : nullptr;
+    return limits;
+}
+
 } // namespace
 
 FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogram,
@@ -233,7 +316,21 @@ FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogr
 
             ImGui::Spacing();
             ImGui::Separator();
+            ImGui::TextDisabled("right-click a value to set bounds");
             ImGui::Spacing();
+
+            // Presets: the whole model as a JSON file, reusable across the
+            // histograms of a measurement.
+            float halfWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
+            if (ImGui::Button("Save preset...", ImVec2(halfWidth, 0.0f)))
+            {
+                action.savePresetRequested = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Load preset...", ImVec2(halfWidth, 0.0f)))
+            {
+                action.loadPresetRequested = true;
+            }
 
             bool fittable = (!model.peaks.empty() || !model.background.empty())
                             && model.range.max > model.range.min;
@@ -510,16 +607,33 @@ void FitModelPanel::DrawAmplitudeRow(FitComponent& component, const HistogramDat
         ImGui::SetTooltip("In counts, as read off the plot.");
     }
 
+    bool bounded = component.amplitude.lowerBound.has_value()
+                   || component.amplitude.upperBound.has_value();
+    if (bounded)
+    {
+        ImVec4 tint = ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+        tint.z += 0.10f;
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, tint);
+    }
+
+    DragLimits limits = LimitsFor(component.amplitude, binWidth);
+
     float checkboxWidth = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x;
     ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.35f);
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - checkboxWidth - 40.0f);
     ImGui::PushFont(monoFont, 0.0f);
     if (ImGui::DragScalar("##value", ImGuiDataType_Double, &display,
-                          DragSpeedFor(display), nullptr, nullptr, "%.6g"))
+                          DragSpeedFor(display), limits.minimumPointer, limits.maximumPointer,
+                          "%.6g"))
     {
         component.amplitude.value = display / binWidth;
     }
     ImGui::PopFont();
+    if (bounded)
+    {
+        ImGui::PopStyleColor();
+    }
+    DrawBoundsPopup(component.amplitude, binWidth);
 
     ImGui::SameLine();
     ImGui::Checkbox("fix", &component.amplitude.fixed);
@@ -538,12 +652,29 @@ bool FitModelPanel::DrawParameterRow(FitParameter& parameter, const char* id, Im
     float checkboxWidth = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x;
     float valueStart = ImGui::GetContentRegionAvail().x * 0.35f;
 
+    bool bounded = parameter.lowerBound.has_value() || parameter.upperBound.has_value();
+    if (bounded)
+    {
+        // A tinted field marks a bounded parameter.
+        ImVec4 tint = ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+        tint.z += 0.10f;
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, tint);
+    }
+
+    DragLimits limits = LimitsFor(parameter, 1.0);
+
     ImGui::SameLine(valueStart);
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - checkboxWidth - 40.0f);
     ImGui::PushFont(monoFont, 0.0f);
     bool changed = ImGui::DragScalar("##value", ImGuiDataType_Double, &parameter.value,
-                                     DragSpeedFor(parameter.value), nullptr, nullptr, "%.6g");
+                                     DragSpeedFor(parameter.value),
+                                     limits.minimumPointer, limits.maximumPointer, "%.6g");
     ImGui::PopFont();
+    if (bounded)
+    {
+        ImGui::PopStyleColor();
+    }
+    DrawBoundsPopup(parameter, 1.0);
 
     ImGui::SameLine();
     ImGui::Checkbox("fix", &parameter.fixed);

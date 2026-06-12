@@ -17,6 +17,16 @@ struct PlotAction
 {
     std::optional<double> addPeakAt; // x position for a new peak
     bool fitRequested = false;
+    bool savePlotRequested = false;
+};
+
+// A screen-space rectangle (top-left origin, window coordinates).
+struct PanelRect
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
 };
 
 // Center panel: the spectrum plot with the model overlay and the direct
@@ -31,6 +41,9 @@ public:
     // used for axis numbers.
     PlotAction Draw(const HistogramData* histogram, FitModel* model,
                     const Theme& theme, ImFont* monoFont);
+
+    // Where the plot window was drawn this frame, for the PNG capture.
+    const PanelRect& WindowRect() const { return m_windowRect; }
 
 private:
     void DrawHistogram(const HistogramData& histogram, const Theme& theme);
@@ -47,6 +60,7 @@ private:
     bool m_openContextMenu = false;
     double m_contextMenuX = 0.0; // plot x where the context menu was opened
     std::string m_lastDrawnName; // to refit the axes when the histogram changes
+    PanelRect m_windowRect;
 };
 
 } // namespace giggle

@@ -62,6 +62,10 @@ private:
 
     void SaveResults(bool asCsv);
     void CopyResultsCsv();
+    void SavePreset();
+    void LoadPreset();
+    void RequestPlotCapture();
+    void PerformPlotCapture(); // runs after rendering, before the swap
 
     GLFWwindow* m_window = nullptr;
     Theme m_theme;
@@ -107,6 +111,9 @@ private:
     std::optional<FitModel> m_fittedModel;
 
     std::string m_errorMessage; // non-empty: the error popup is shown
+
+    // A plot capture waiting for the end of the frame (empty: none).
+    std::string m_pendingCapturePath;
 
     FileTreePanel m_fileTreePanel;
     PlotPanel m_plotPanel;

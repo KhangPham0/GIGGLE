@@ -223,6 +223,8 @@ Json MakeResultsDocument(const Provenance& provenance, const FitModel& model, co
     resultJson["message"] = result.message;
     resultJson["chi_square"] = result.chiSquare;
     resultJson["degrees_of_freedom"] = result.degreesOfFreedom;
+    resultJson["reduced_chi_square"] =
+        result.degreesOfFreedom > 0 ? result.chiSquare / result.degreesOfFreedom : 0.0;
 
     resultJson["peaks"] = Json::array();
     for (size_t i = 0; i < result.peaks.size(); ++i)
@@ -300,6 +302,7 @@ void AppendCsvRow(std::ostringstream& out, const ComponentResult& component,
         << (fwhm.has_value() ? Cell(fwhm->error) : "") << ','
         << Cell(component.amplitude.value) << ',' << Cell(component.amplitude.error) << ','
         << Cell(result.chiSquare) << ',' << result.degreesOfFreedom << ','
+        << Cell(result.degreesOfFreedom > 0 ? result.chiSquare / result.degreesOfFreedom : 0.0) << ','
         << Cell(provenance.histogramName) << ',' << Cell(provenance.sourceFile) << ','
         << provenance.timestamp << '\n';
 }
@@ -310,7 +313,7 @@ std::string MakeResultsCsv(const Provenance& provenance, const FitModel& model, 
 {
     std::ostringstream out;
     out << "component,shape,counts,counts_error,centroid,centroid_error,"
-           "fwhm,fwhm_error,amplitude,amplitude_error,chi2,ndf,"
+           "fwhm,fwhm_error,amplitude,amplitude_error,chi2,ndf,reduced_chi2,"
            "histogram,source_file,timestamp\n";
 
     for (size_t i = 0; i < result.peaks.size(); ++i)

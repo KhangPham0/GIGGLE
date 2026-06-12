@@ -5,6 +5,7 @@ add_executable(giggle
     main.cpp
     ui/App.cpp
     ui/Fonts.cpp
+    ui/ImageExport.cpp
     ui/Theme.cpp
     ui/panels/FileTreePanel.cpp
     ui/panels/FitModelPanel.cpp
@@ -19,4 +20,4 @@ find_package(OpenGL REQUIRED)
 
 # implot links imgui publicly, so imgui's headers and library come with it,
 # and giggle_rootbridge brings giggle_core the same way.
-target_link_libraries(giggle PRIVATE giggle_rootbridge implot nfd OpenGL::GL)
+target_link_libraries(giggle PRIVATE giggle_rootbridge implot nfd stb OpenGL::GL)

@@ -21,6 +21,10 @@ add_library(imgui STATIC
 target_include_directories(imgui PUBLIC imgui imgui/backends imgui/misc/cpp)
 target_link_libraries(imgui PUBLIC glfw)
 
+# stb: single-header image writing (the PNG export).
+add_library(stb INTERFACE)
+target_include_directories(stb INTERFACE stb)
+
 # nfd: native open/save file dialogs.
 set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(nfd)

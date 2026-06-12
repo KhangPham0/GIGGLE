@@ -7,6 +7,7 @@
 
 #include "core/Serialization.h"
 #include "core/Shapes.h"
+#include "ui/ImageExport.h"
 
 #include "imgui.h"
 #include "imgui_internal.h" // DockBuilder API, used for the default layout
@@ -96,6 +97,11 @@ int App::Run()
         glClearColor(clear.x, clear.y, clear.z, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        if (!m_pendingCapturePath.empty())
+        {
+            PerformPlotCapture();
+        }
 
         glfwSwapBuffers(m_window);
     }
@@ -208,6 +214,10 @@ void App::DrawFrame()
     {
         StartFit();
     }
+    if (plotAction.savePlotRequested)
+    {
+        RequestPlotCapture();
+    }
 
     if (m_showFitModel)
     {
@@ -225,6 +235,14 @@ void App::DrawFrame()
             m_preFitModel.reset();
             m_fitResult.reset();
             m_fittedModel.reset();
+        }
+        if (fitAction.savePresetRequested)
+        {
+            SavePreset();
+        }
+        if (fitAction.loadPresetRequested)
+        {
+            LoadPreset();
         }
     }
 
@@ -261,6 +279,21 @@ void App::DrawMainMenu()
             {
                 OpenFileDialog();
             }
+            ImGui::Separator();
+            ImGui::BeginDisabled(!m_histogram.has_value());
+            if (ImGui::MenuItem("Save Fit Preset..."))
+            {
+                SavePreset();
+            }
+            if (ImGui::MenuItem("Load Fit Preset..."))
+            {
+                LoadPreset();
+            }
+            if (ImGui::MenuItem("Export Plot as PNG..."))
+            {
+                RequestPlotCapture();
+            }
+            ImGui::EndDisabled();
             ImGui::Separator();
             if (ImGui::MenuItem("Quit"))
             {
@@ -490,6 +523,129 @@ void App::CopyResultsCsv()
     Provenance provenance = MakeProvenance(m_sourceFilePath, m_selectedHistogram);
     std::string csv = MakeResultsCsv(provenance, m_fittedModel.value(), m_fitResult.value());
     ImGui::SetClipboardText(csv.c_str());
+}
+
+void App::SavePreset()
+{
+    std::string histogramName = std::filesystem::path(m_selectedHistogram).filename().string();
+    std::string defaultName = histogramName + "_preset.json";
+    std::string defaultDirectory = std::filesystem::path(m_sourceFilePath).parent_path().string();
+
+    nfdu8char_t* selectedPath = nullptr;
+    nfdu8filteritem_t filter = { "JSON", "json" };
+    nfdresult_t outcome = NFD_SaveDialogU8(&selectedPath, &filter, 1,
+                                           defaultDirectory.c_str(), defaultName.c_str());
+    if (outcome != NFD_OKAY)
+    {
+        if (outcome == NFD_ERROR)
+        {
+            m_errorMessage = NFD_GetError();
+        }
+        return;
+    }
+
+    std::ofstream file(selectedPath);
+    if (file)
+    {
+        file << ToJson(m_model).dump(4) << "\n";
+    }
+    if (!file)
+    {
+        m_errorMessage = std::string("could not write ") + selectedPath;
+    }
+    NFD_FreePathU8(selectedPath);
+}
+
+void App::LoadPreset()
+{
+    nfdu8char_t* selectedPath = nullptr;
+    nfdu8filteritem_t filter = { "JSON", "json" };
+    nfdresult_t outcome = NFD_OpenDialogU8(&selectedPath, &filter, 1, nullptr);
+    if (outcome != NFD_OKAY)
+    {
+        if (outcome == NFD_ERROR)
+        {
+            m_errorMessage = NFD_GetError();
+        }
+        return;
+    }
+
+    try
+    {
+        std::ifstream file(selectedPath);
+        if (!file)
+        {
+            throw std::runtime_error(std::string("could not read ") + selectedPath);
+        }
+        Json document = Json::parse(file);
+        FitModel loaded = FitModelFromJson(document);
+
+        // Presets travel between histograms with different binning, so the
+        // range snaps to this histogram's bin edges. Old results no longer
+        // describe the model.
+        if (m_histogram.has_value())
+        {
+            loaded.range = SnapRangeToBinEdges(m_histogram.value(), loaded.range);
+        }
+        m_model = loaded;
+        m_preFitModel.reset();
+        m_fitResult.reset();
+        m_fittedModel.reset();
+    }
+    catch (const std::exception& error)
+    {
+        m_errorMessage = error.what();
+    }
+    NFD_FreePathU8(selectedPath);
+}
+
+void App::RequestPlotCapture()
+{
+    std::string histogramName = std::filesystem::path(m_selectedHistogram).filename().string();
+    std::string defaultName = histogramName + "_plot.png";
+    std::string defaultDirectory = std::filesystem::path(m_sourceFilePath).parent_path().string();
+
+    nfdu8char_t* selectedPath = nullptr;
+    nfdu8filteritem_t filter = { "PNG", "png" };
+    nfdresult_t outcome = NFD_SaveDialogU8(&selectedPath, &filter, 1,
+                                           defaultDirectory.c_str(), defaultName.c_str());
+    if (outcome != NFD_OKAY)
+    {
+        if (outcome == NFD_ERROR)
+        {
+            m_errorMessage = NFD_GetError();
+        }
+        return;
+    }
+
+    // The pixels are read at the end of this frame, after rendering.
+    m_pendingCapturePath = selectedPath;
+    NFD_FreePathU8(selectedPath);
+}
+
+void App::PerformPlotCapture()
+{
+    // Window coordinates -> framebuffer pixels (retina displays differ).
+    int windowWidth = 0;
+    int windowHeight = 0;
+    glfwGetWindowSize(m_window, &windowWidth, &windowHeight);
+    int framebufferWidth = 0;
+    int framebufferHeight = 0;
+    glfwGetFramebufferSize(m_window, &framebufferWidth, &framebufferHeight);
+    float scale = windowWidth > 0 ? static_cast<float>(framebufferWidth) / windowWidth : 1.0f;
+
+    const PanelRect& rect = m_plotPanel.WindowRect();
+    bool saved = SaveFramebufferRegionAsPng(m_pendingCapturePath.c_str(),
+                                            static_cast<int>(rect.x * scale),
+                                            static_cast<int>(rect.y * scale),
+                                            static_cast<int>(rect.width * scale),
+                                            static_cast<int>(rect.height * scale),
+                                            framebufferHeight);
+    if (!saved)
+    {
+        m_errorMessage = "could not save the plot to " + m_pendingCapturePath;
+    }
+    m_pendingCapturePath.clear();
 }
 
 // The default three-pane layout: file tree left, plot center, fit model

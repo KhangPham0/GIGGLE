@@ -188,6 +188,32 @@ TEST_CASE("every converged fit passes the TF1NormSum cross-check")
     }
 }
 
+TEST_CASE("a fit pinned on a shape bound still passes the cross-check")
+{
+    // The bound is mirrored into the TF1NormSum re-fit, so a result that
+    // legitimately sits on it is compared under the same rules.
+    RootFitEngine engine;
+    HistogramData data = GenerateToy(37);
+
+    FitModel model = MakeToyModel();
+    // The true sigma is 3.0; this floor forces the fit onto the bound.
+    model.peaks[0].parameters[1].value = 3.6;
+    model.peaks[0].parameters[1].lowerBound = 3.5;
+    model.peaks[0].parameters[1].upperBound = 4.5;
+
+    FitResult result = engine.Fit(data, model);
+    REQUIRE(result.converged);
+    CHECK(result.peaks[0].parameters[1].value == doctest::Approx(3.5)); // pinned
+    bool boundWarning = false;
+    for (const std::string& warning : result.warnings)
+    {
+        boundWarning |= warning.find("at its bound") != std::string::npos;
+    }
+    CHECK(boundWarning);
+    CHECK(result.normSumCheck.performed);
+    CHECK(result.normSumCheck.agreed);
+}
+
 TEST_CASE("mid-bin ranges fit identically to their snapped versions")
 {
     RootFitEngine engine;

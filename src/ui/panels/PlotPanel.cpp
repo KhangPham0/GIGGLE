@@ -129,6 +129,10 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::Begin(Title))
     {
+        ImVec2 windowPos = ImGui::GetWindowPos();
+        ImVec2 windowSize = ImGui::GetWindowSize();
+        m_windowRect = { windowPos.x, windowPos.y, windowSize.x, windowSize.y };
+
         if (histogram != nullptr && histogram->name != m_lastDrawnName)
         {
             m_requestAxesFit = true;
@@ -513,6 +517,10 @@ void PlotPanel::DrawContextMenu(FitModel& model, const HistogramData& histogram,
     if (ImGui::MenuItem("Fit", "F"))
     {
         action.fitRequested = true;
+    }
+    if (ImGui::MenuItem("Save plot as PNG..."))
+    {
+        action.savePlotRequested = true;
     }
 
     ImGui::Separator();

@@ -448,6 +448,8 @@ TEST_CASE("results export carries warnings, the cross-check, and a CSV table")
     Provenance provenance = MakeProvenance("run52.root", "spectra/h_ex");
 
     Json document = MakeResultsDocument(provenance, model, result);
+    CHECK(document.at("result").at("reduced_chi_square").get<double>()
+          == doctest::Approx(42.5 / 37.0));
     CHECK(document.at("result").at("normsum_cross_check").at("agreed") == true);
     CHECK(document.at("result").at("warnings").size() == 1);
     CHECK(document.at("result").at("peaks")[0].at("centroid").at("value") == 150.2);

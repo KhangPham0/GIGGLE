@@ -17,6 +17,8 @@ struct FitPanelAction
 {
     bool fitRequested = false;
     bool revertRequested = false;
+    bool savePresetRequested = false;
+    bool loadPresetRequested = false;
 };
 
 // Right panel: builds the fit model. Edits the shared FitModel in place;

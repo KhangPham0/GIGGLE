@@ -30,6 +30,7 @@ ResultsAction ResultsPanel::Draw(const FitResult* result, const HistogramData* h
                                  const FitModel* model, const Theme& theme, ImFont* monoFont)
 {
     ResultsAction action;
+    m_histogramForUnits = histogram;
 
     if (ImGui::Begin(Title))
     {
@@ -103,30 +104,41 @@ void ResultsPanel::DrawSummaryLine(const FitResult& result, const Theme& theme, 
 
     ImGui::SameLine(0.0f, 30.0f);
     ImGui::PushFont(monoFont, 0.0f);
-    ImGui::Text("chi2/ndf = %.4g / %d", result.chiSquare, result.degreesOfFreedom);
+    double reduced = result.degreesOfFreedom > 0
+                         ? result.chiSquare / result.degreesOfFreedom
+                         : 0.0;
+    ImGui::Text("chi2/ndf = %.4g / %d = %.3f", result.chiSquare, result.degreesOfFreedom, reduced);
     ImGui::PopFont();
 
-    // The independent TF1NormSum re-fit of the same data.
+    // The independent verification of the counts.
     if (result.converged)
     {
         ImGui::SameLine(0.0f, 30.0f);
         const CrossCheck& check = result.normSumCheck;
         if (!check.performed)
         {
-            ImGui::TextDisabled("cross-check %s", check.detail.c_str());
+            ImGui::TextDisabled("counts not independently verified: %s", check.detail.c_str());
         }
         else if (check.agreed)
         {
-            ImGui::TextColored(theme.statusGood, "cross-check passed (%s)", check.detail.c_str());
+            ImGui::TextColored(theme.statusGood, "counts independently verified (%s)",
+                               check.detail.c_str());
         }
         else
         {
-            ImGui::TextColored(theme.statusError, "CROSS-CHECK FAILED (%s)", check.detail.c_str());
+            ImGui::TextColored(theme.statusError, "VERIFICATION FAILED (%s) - do not trust these counts",
+                               check.detail.c_str());
         }
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Every converged fit is repeated through ROOT's\n"
-                              "TF1NormSum and the counts compared.");
+            ImGui::SetTooltip(
+                "After every converged fit, GIGGLE re-fits the same data a second,\n"
+                "mathematically independent way (ROOT's TF1NormSum, where each\n"
+                "component's counts are themselves fit parameters) and compares the\n"
+                "counts and uncertainties from both routes.\n"
+                "\n"
+                "Agreement means two independent methods give the same numbers.\n"
+                "Disagreement means the fit is unstable: inspect it before using it.");
         }
     }
 }
@@ -173,13 +185,31 @@ void ResultsPanel::DrawComponentsTable(const FitResult& result, const FitModel& 
 
     ImGui::EndTable();
 
-    // The raw fitted parameters, for the record.
+    // The raw fitted parameters, for the record. Amplitudes show in the
+    // same plot units as the Fit Model panel (height/level in counts);
+    // exports keep the raw density value.
     if (ImGui::TreeNode("All parameters"))
     {
         ImGui::PushFont(monoFont, 0.0f);
-        auto listComponent = [&](const ComponentResult& component, const FitComponent& modelComponent) {
-            ImGui::Text("%-12s  amplitude = %10.6g +- %-8.3g", component.label.c_str(),
-                        component.amplitude.value, component.amplitude.error);
+        auto listComponent = [&](const ComponentResult& component, const FitComponent& modelComponent,
+                                 bool isPeak) {
+            double position = m_histogramForUnits != nullptr ? m_histogramForUnits->XMin() : 0.0;
+            for (const FitParameter& parameter : modelComponent.parameters)
+            {
+                if (parameter.name == "mean")
+                {
+                    position = parameter.value;
+                    break;
+                }
+            }
+            bool custom = modelComponent.shape == ShapeKind::Custom;
+            double scale = custom || m_histogramForUnits == nullptr
+                               ? 1.0
+                               : BinWidthAt(*m_histogramForUnits, position);
+            const char* amplitudeLabel = custom ? "amplitude" : (isPeak ? "height" : "level");
+
+            ImGui::Text("%-12s  %-9s = %10.6g +- %-8.3g", component.label.c_str(), amplitudeLabel,
+                        component.amplitude.value * scale, component.amplitude.error * scale);
             for (size_t j = 0; j < component.parameters.size(); ++j)
             {
                 const char* name = j < modelComponent.parameters.size()
@@ -191,11 +221,11 @@ void ResultsPanel::DrawComponentsTable(const FitResult& result, const FitModel& 
         };
         for (size_t i = 0; i < result.peaks.size() && i < model.peaks.size(); ++i)
         {
-            listComponent(result.peaks[i], model.peaks[i]);
+            listComponent(result.peaks[i], model.peaks[i], true);
         }
         for (size_t i = 0; i < result.background.size() && i < model.background.size(); ++i)
         {
-            listComponent(result.background[i], model.background[i]);
+            listComponent(result.background[i], model.background[i], false);
         }
         ImGui::PopFont();
         ImGui::TreePop();
