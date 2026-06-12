@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <complex>
 
 namespace giggle {
 
@@ -10,10 +11,132 @@ namespace {
 const double kSqrt2 = std::sqrt(2.0);
 const double kSqrtHalfPi = std::sqrt(M_PI / 2.0);
 
+CustomShapeEvaluator s_customShapeEvaluator;
+
 // The i-th parameter, or fallback when fewer are given.
 double Param(const double* parameters, int count, int index, double fallback = 0.0)
 {
     return index < count ? parameters[index] : fallback;
+}
+
+// Humlicek's w4 rational approximation of the Faddeeva function w(z) for
+// Im(z) >= 0; relative accuracy about 1e-4 (Humlicek, JQSRT 27, 437, 1982).
+std::complex<double> FaddeevaW(double x, double y)
+{
+    std::complex<double> t(y, -x);
+    double s = std::abs(x) + y;
+
+    if (s >= 15.0)
+    {
+        return t * 0.5641896 / (0.5 + t * t);
+    }
+    if (s >= 5.5)
+    {
+        std::complex<double> u = t * t;
+        return t * (1.410474 + u * 0.5641896) / (0.75 + u * (3.0 + u));
+    }
+    if (y >= 0.195 * std::abs(x) - 0.176)
+    {
+        return (16.4955 + t * (20.20933 + t * (11.96482 + t * (3.778987 + t * 0.5642236))))
+               / (16.4955 + t * (38.82363 + t * (39.27121 + t * (21.69274 + t * (6.699398 + t)))));
+    }
+    std::complex<double> u = t * t;
+    return std::exp(u)
+           - t * (36183.31 - u * (3321.9905 - u * (1540.787 - u * (219.0313 - u * (35.76683 - u * (1.320522 - u * 0.56419))))))
+                 / (32066.6 - u * (24322.84 - u * (9022.228 - u * (2186.181 - u * (364.2191 - u * (61.57037 - u * (1.841439 - u)))))));
+}
+
+// The Voigt profile relative to its central value, so it is 1 at u = 0.
+// u = x - mean. Falls back to the pure limits when one width vanishes.
+double VoigtShape(double u, double sigma, double gamma)
+{
+    sigma = std::abs(sigma);
+    gamma = std::abs(gamma);
+    if (sigma < 1e-12)
+    {
+        double z = gamma > 1e-12 ? u / gamma : 0.0;
+        return 1.0 / (1.0 + z * z); // Lorentzian limit
+    }
+    if (gamma < 1e-12 * sigma)
+    {
+        double z = u / sigma;
+        return std::exp(-0.5 * z * z); // Gaussian limit
+    }
+    double real = u / (sigma * kSqrt2);
+    double imaginary = gamma / (sigma * kSqrt2);
+    double center = FaddeevaW(0.0, imaginary).real();
+    return FaddeevaW(real, imaginary).real() / center;
+}
+
+// The skewed-gaussian tail term of the gf3 lineshape:
+//
+//   T(u) = exp(u / beta) * erfc(u / (sqrt2 sigma) + k),  k = sigma / (sqrt2 beta)
+//
+// For u well above the mean the exp overflows while the erfc underflows;
+// their product decays like a gaussian, so that region uses the erfc
+// asymptotic erfc(t) ~ exp(-t^2) / (t sqrt pi) directly.
+double TailTerm(double u, double sigma, double beta)
+{
+    double v = u / (kSqrt2 * sigma);
+    double k = sigma / (kSqrt2 * beta);
+    double t = v + k;
+    if (t > 6.0)
+    {
+        return std::exp(-k * k - v * v) / (t * std::sqrt(M_PI));
+    }
+    return std::exp(u / beta) * std::erfc(t);
+}
+
+// Antiderivative of TailTerm (checked by differentiation):
+//
+//   F(u) = beta * [ T(u) + exp(-k^2) * erf(u / (sqrt2 sigma)) ]
+double TailTermAntiderivative(double u, double sigma, double beta)
+{
+    double v = u / (kSqrt2 * sigma);
+    double k = sigma / (kSqrt2 * beta);
+    return beta * (TailTerm(u, sigma, beta) + std::exp(-k * k) * std::erf(v));
+}
+
+// The gf3 composite, scaled to 1 at the mean:
+//
+//   shape(u) = [ (1 - r) exp(-u^2 / 2 sigma^2) + r T(u) ] / N0
+//   N0       = (1 - r) + r erfc(k)
+//
+// r clamped to [0, 1]; widths floored to stay finite.
+struct TailShapeParts
+{
+    double sigma;
+    double beta;
+    double fraction;
+    double norm;
+};
+
+TailShapeParts TailParts(const double* p, int count)
+{
+    TailShapeParts parts;
+    parts.sigma = std::max(std::abs(Param(p, count, 1, 1.0)), 1e-12);
+    parts.fraction = std::min(std::max(Param(p, count, 2), 0.0), 1.0);
+    parts.beta = std::max(std::abs(Param(p, count, 3, 1.0)), 1e-12);
+    double k = parts.sigma / (kSqrt2 * parts.beta);
+    parts.norm = (1.0 - parts.fraction) + parts.fraction * std::erfc(k);
+    if (parts.norm < 1e-300)
+    {
+        parts.norm = 1e-300; // fully tailed with a vanishing tail term
+    }
+    return parts;
+}
+
+// Composite Simpson integration for the shapes without a closed form.
+double SimpsonIntegral(const std::function<double(double)>& f, double a, double b)
+{
+    const int intervals = 200; // even; smooth integrands converge fast
+    double h = (b - a) / intervals;
+    double sum = f(a) + f(b);
+    for (int i = 1; i < intervals; ++i)
+    {
+        sum += f(a + i * h) * (i % 2 == 0 ? 2.0 : 4.0);
+    }
+    return sum * h / 3.0;
 }
 
 // Copies a component's parameter values into a flat array. Implemented
@@ -32,7 +155,17 @@ int FlattenParameters(const FitComponent& component, double* buffer, int capacit
 
 bool ShapeIsImplemented(ShapeKind kind)
 {
-    return kind != ShapeKind::Voigt && kind != ShapeKind::Custom;
+    return kind != ShapeKind::Custom;
+}
+
+void SetCustomShapeEvaluator(CustomShapeEvaluator evaluator)
+{
+    s_customShapeEvaluator = std::move(evaluator);
+}
+
+bool HasCustomShapeEvaluator()
+{
+    return static_cast<bool>(s_customShapeEvaluator);
 }
 
 double ShapeValue(ShapeKind kind, const double* p, int count, double x, double pivot)
@@ -65,8 +198,24 @@ double ShapeValue(ShapeKind kind, const double* p, int count, double x, double p
         case ShapeKind::Exponential:
             return std::exp(Param(p, count, 0) * (x - pivot));
         case ShapeKind::Voigt:
+            return VoigtShape(x - Param(p, count, 0), Param(p, count, 1, 1.0), Param(p, count, 2));
+        case ShapeKind::GaussianTail:
+        {
+            TailShapeParts parts = TailParts(p, count);
+            double u = x - Param(p, count, 0);
+            double z = u / parts.sigma;
+            return ((1.0 - parts.fraction) * std::exp(-0.5 * z * z)
+                    + parts.fraction * TailTerm(u, parts.sigma, parts.beta))
+                   / parts.norm;
+        }
+        case ShapeKind::Step:
+        {
+            double edge = Param(p, count, 0);
+            double width = std::max(std::abs(Param(p, count, 1, 1.0)), 1e-12);
+            return 0.5 * std::erfc((x - edge) / (kSqrt2 * width));
+        }
         case ShapeKind::Custom:
-            return 0.0; // not implemented yet
+            return 0.0; // needs the component's formula; see the FitComponent overload
     }
     return 0.0;
 }
@@ -117,14 +266,45 @@ double ShapeIntegral(ShapeKind kind, const double* p, int count, double a, doubl
             return (std::exp(slope * (b - pivot)) - std::exp(slope * (a - pivot))) / slope;
         }
         case ShapeKind::Voigt:
+            return SimpsonIntegral(
+                [&](double x) { return ShapeValue(kind, p, count, x, pivot); }, a, b);
+        case ShapeKind::GaussianTail:
+        {
+            TailShapeParts parts = TailParts(p, count);
+            double mean = Param(p, count, 0);
+            double ua = a - mean;
+            double ub = b - mean;
+            double gaussPart = parts.sigma * kSqrtHalfPi
+                               * (std::erf(ub / (parts.sigma * kSqrt2))
+                                  - std::erf(ua / (parts.sigma * kSqrt2)));
+            double tailPart = TailTermAntiderivative(ub, parts.sigma, parts.beta)
+                              - TailTermAntiderivative(ua, parts.sigma, parts.beta);
+            return ((1.0 - parts.fraction) * gaussPart + parts.fraction * tailPart) / parts.norm;
+        }
+        case ShapeKind::Step:
+        {
+            double edge = Param(p, count, 0);
+            double width = std::max(std::abs(Param(p, count, 1, 1.0)), 1e-12);
+            // Antiderivative of erfc(t)/2 with t = (x - edge)/(sqrt2 width):
+            //   (width/sqrt2) * (t erfc(t) - exp(-t^2)/sqrt(pi))
+            auto antiderivative = [&](double x) {
+                double t = (x - edge) / (kSqrt2 * width);
+                return (width / kSqrt2) * (t * std::erfc(t) - std::exp(-t * t) / std::sqrt(M_PI));
+            };
+            return antiderivative(b) - antiderivative(a);
+        }
         case ShapeKind::Custom:
-            return 0.0; // not implemented yet
+            return 0.0; // needs the component's formula; see the FitComponent overload
     }
     return 0.0;
 }
 
 double ShapeValue(const FitComponent& component, const FitRange& range, double x)
 {
+    if (component.shape == ShapeKind::Custom)
+    {
+        return s_customShapeEvaluator ? s_customShapeEvaluator(component, x) : 0.0;
+    }
     double parameters[8];
     int count = FlattenParameters(component, parameters, 8);
     return ShapeValue(component.shape, parameters, count, x, RangePivot(range));
@@ -132,6 +312,15 @@ double ShapeValue(const FitComponent& component, const FitRange& range, double x
 
 double ShapeIntegral(const FitComponent& component, const FitRange& range, double a, double b)
 {
+    if (component.shape == ShapeKind::Custom)
+    {
+        if (!s_customShapeEvaluator)
+        {
+            return 0.0;
+        }
+        return SimpsonIntegral(
+            [&](double x) { return s_customShapeEvaluator(component, x); }, a, b);
+    }
     double parameters[8];
     int count = FlattenParameters(component, parameters, 8);
     return ShapeIntegral(component.shape, parameters, count, a, b, RangePivot(range));
@@ -197,8 +386,12 @@ std::optional<ValueWithError> PeakCentroid(ShapeKind kind, const ComponentResult
     switch (kind)
     {
         case ShapeKind::Gaussian:
+        case ShapeKind::GaussianTail:
         case ShapeKind::Lorentzian:
-            // The first parameter is the mean.
+        case ShapeKind::Voigt:
+            // The first parameter is the mean. (For the tailed gaussian
+            // this is the position of the gaussian core, as in gf3, not
+            // the center of gravity of the asymmetric profile.)
             if (!result.parameters.empty())
             {
                 return result.parameters[0];
@@ -209,10 +402,88 @@ std::optional<ValueWithError> PeakCentroid(ShapeKind kind, const ComponentResult
     }
 }
 
+namespace {
+
+// The distance from the mean to the half-maximum crossing in the given
+// direction, found by expansion and bisection on the shape itself.
+double HalfMaxDistance(ShapeKind kind, const double* p, int count, double direction)
+{
+    double mean = count > 0 ? p[0] : 0.0;
+    double scale = count > 1 ? std::max(std::abs(p[1]), 1e-9) : 1.0;
+
+    double inside = 0.0;
+    double outside = scale;
+    int expansions = 0;
+    while (ShapeValue(kind, p, count, mean + direction * outside, 0.0) > 0.5 && expansions < 60)
+    {
+        inside = outside;
+        outside *= 2.0;
+        ++expansions;
+    }
+    for (int i = 0; i < 60; ++i)
+    {
+        double middle = 0.5 * (inside + outside);
+        if (ShapeValue(kind, p, count, mean + direction * middle, 0.0) > 0.5)
+        {
+            inside = middle;
+        }
+        else
+        {
+            outside = middle;
+        }
+    }
+    return 0.5 * (inside + outside);
+}
+
+// FWHM of an asymmetric shape by locating both half-max crossings; the
+// error perturbs each parameter by its uncertainty (correlations between
+// the shape parameters are neglected, as for the Voigt approximation).
+ValueWithError NumericFWHM(ShapeKind kind, const ComponentResult& result)
+{
+    double parameters[8];
+    int count = std::min(static_cast<int>(result.parameters.size()), 8);
+    for (int i = 0; i < count; ++i)
+    {
+        parameters[i] = result.parameters[i].value;
+    }
+
+    auto fullWidth = [&]() {
+        return HalfMaxDistance(kind, parameters, count, -1.0)
+               + HalfMaxDistance(kind, parameters, count, +1.0);
+    };
+
+    ValueWithError fwhm;
+    fwhm.value = fullWidth();
+
+    double variance = 0.0;
+    for (int i = 0; i < count; ++i)
+    {
+        if (result.parameters[i].error <= 0.0)
+        {
+            continue;
+        }
+        double original = parameters[i];
+        parameters[i] = original + result.parameters[i].error;
+        double shifted = fullWidth();
+        parameters[i] = original;
+        variance += (shifted - fwhm.value) * (shifted - fwhm.value);
+    }
+    fwhm.error = std::sqrt(variance);
+    return fwhm;
+}
+
+} // namespace
+
 std::optional<ValueWithError> PeakFWHM(ShapeKind kind, const ComponentResult& result)
 {
     switch (kind)
     {
+        case ShapeKind::GaussianTail:
+            if (result.parameters.size() >= 4)
+            {
+                return NumericFWHM(kind, result);
+            }
+            return std::nullopt;
         case ShapeKind::Gaussian:
         {
             // FWHM = 2 sqrt(2 ln 2) sigma
@@ -231,6 +502,29 @@ std::optional<ValueWithError> PeakFWHM(ShapeKind kind, const ComponentResult& re
             {
                 return ValueWithError{ 2.0 * result.parameters[1].value,
                                        2.0 * result.parameters[1].error };
+            }
+            return std::nullopt;
+        }
+        case ShapeKind::Voigt:
+        {
+            // Olivero-Longbothum approximation (accuracy ~0.02%):
+            //   F ~ 0.5346 fL + sqrt(0.2166 fL^2 + fG^2)
+            // The error combines the sigma and gamma errors through the
+            // formula's partial derivatives; their correlation (not
+            // available here) is neglected.
+            if (result.parameters.size() >= 3)
+            {
+                const double gaussFactor = 2.0 * std::sqrt(2.0 * std::log(2.0));
+                double fG = gaussFactor * std::abs(result.parameters[1].value);
+                double fL = 2.0 * std::abs(result.parameters[2].value);
+                double rootTerm = std::sqrt(0.2166 * fL * fL + fG * fG);
+                double fwhm = 0.5346 * fL + rootTerm;
+
+                double dFdfL = 0.5346 + (rootTerm > 0.0 ? 0.2166 * fL / rootTerm : 0.0);
+                double dFdfG = rootTerm > 0.0 ? fG / rootTerm : 1.0;
+                double errorL = dFdfL * 2.0 * result.parameters[2].error;
+                double errorG = dFdfG * gaussFactor * result.parameters[1].error;
+                return ValueWithError{ fwhm, std::sqrt(errorL * errorL + errorG * errorG) };
             }
             return std::nullopt;
         }

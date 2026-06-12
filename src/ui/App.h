@@ -10,6 +10,7 @@
 #include "core/FitEngine.h"
 #include "core/FitModel.h"
 #include "core/FitResult.h"
+#include "core/FormulaValidator.h"
 #include "core/HistogramData.h"
 #include "core/SpectrumSource.h"
 #include "Fonts.h"
@@ -32,7 +33,8 @@ using SourceFactory = std::function<std::unique_ptr<SpectrumSource>(const std::s
 class App
 {
 public:
-    App(SourceFactory openSource, std::unique_ptr<FitEngine> fitEngine);
+    App(SourceFactory openSource, std::unique_ptr<FitEngine> fitEngine,
+        FormulaValidator formulaValidator);
 
     // Makes the app open this file right after starting (command line use).
     void OpenFileOnStartup(const std::string& filePath);
@@ -80,6 +82,7 @@ private:
     bool m_showResults = true;
 
     SourceFactory m_openSource;
+    FormulaValidator m_formulaValidator;
     std::string m_startupFile;
 
     std::unique_ptr<SpectrumSource> m_source;

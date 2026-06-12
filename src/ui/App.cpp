@@ -52,8 +52,11 @@ static std::filesystem::path ExecutableDirectory()
     return std::filesystem::current_path();
 }
 
-App::App(SourceFactory openSource, std::unique_ptr<FitEngine> fitEngine)
-    : m_openSource(std::move(openSource)), m_fitEngine(std::move(fitEngine))
+App::App(SourceFactory openSource, std::unique_ptr<FitEngine> fitEngine,
+         FormulaValidator formulaValidator)
+    : m_openSource(std::move(openSource)),
+      m_formulaValidator(std::move(formulaValidator)),
+      m_fitEngine(std::move(fitEngine))
 {
 }
 
@@ -211,7 +214,7 @@ void App::DrawFrame()
         FitPanelAction fitAction = m_fitModelPanel.Draw(m_model,
                                                         m_histogram.has_value() ? &m_histogram.value() : nullptr,
                                                         FitRunning(), m_preFitModel.has_value(),
-                                                        m_theme, m_fonts.mono);
+                                                        m_theme, m_fonts.mono, m_formulaValidator);
         if (fitAction.fitRequested)
         {
             StartFit();

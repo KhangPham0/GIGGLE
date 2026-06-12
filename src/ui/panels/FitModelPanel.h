@@ -1,7 +1,10 @@
 #ifndef GIGGLE_UI_PANELS_FIT_MODEL_PANEL_H
 #define GIGGLE_UI_PANELS_FIT_MODEL_PANEL_H
 
+#include <string>
+
 #include "core/FitModel.h"
+#include "core/FormulaValidator.h"
 #include "core/HistogramData.h"
 #include "ui/Theme.h"
 
@@ -25,16 +28,24 @@ public:
     static constexpr const char* Title = "Fit Model";
 
     // The histogram is used to express peak heights in plot units; the
-    // mono font is used for numeric fields. When it is null (no histogram
-    // open) the panel only shows a hint.
+    // mono font is used for numeric fields; the validator checks custom
+    // formulas. When the histogram is null (no file open) the panel only
+    // shows a hint.
     FitPanelAction Draw(FitModel& model, const HistogramData* histogram, bool fitRunning,
-                        bool canRevert, const Theme& theme, ImFont* monoFont);
+                        bool canRevert, const Theme& theme, ImFont* monoFont,
+                        const FormulaValidator& validator);
 
 private:
     void DrawRangeSection(FitModel& model, const HistogramData& histogram, ImFont* monoFont);
-    void DrawPeaksSection(FitModel& model, const HistogramData& histogram, ImFont* monoFont);
-    void DrawBackgroundSection(FitModel& model, const HistogramData& histogram, ImFont* monoFont);
+    void DrawPeaksSection(FitModel& model, const HistogramData& histogram, ImFont* monoFont,
+                          const Theme& theme, const FormulaValidator& validator);
+    void DrawBackgroundSection(FitModel& model, const HistogramData& histogram, ImFont* monoFont,
+                               const Theme& theme, const FormulaValidator& validator);
     void DrawStatisticSection(FitModel& model);
+
+    // The formula field with its Apply button; shown for custom components.
+    void DrawFormulaEditor(FitComponent& component, const Theme& theme,
+                           const FormulaValidator& validator);
 
     // The amplitude parameter row, displayed in plot units (peak height /
     // background level in counts).
@@ -44,6 +55,11 @@ private:
     // One labeled row with a draggable value and a "fix" checkbox.
     // Returns true when the value changed.
     bool DrawParameterRow(FitParameter& parameter, const char* id, ImFont* monoFont);
+
+    // Feedback from the last formula Apply, shown under that component.
+    const void* m_formulaMessageOwner = nullptr;
+    bool m_formulaMessageIsError = false;
+    std::string m_formulaMessage;
 };
 
 } // namespace giggle

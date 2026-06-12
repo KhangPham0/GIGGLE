@@ -16,10 +16,23 @@
 #include "TROOT.h"
 
 #include "core/Shapes.h"
+#include "FormulaSupport.h"
 
 namespace giggle {
 
 namespace {
+
+// Evaluates one component's unit-amplitude shape from a raw parameter
+// array, custom formulas included.
+double SlotShapeValue(const FitComponent& component, const double* parameters, int count,
+                      double x, double pivot)
+{
+    if (component.shape == ShapeKind::Custom)
+    {
+        return EvaluateFormulaRaw(component.formula, parameters, count, x);
+    }
+    return ShapeValue(component.shape, parameters, count, x, pivot);
+}
 
 // Where each component's parameters sit in the flat parameter array: for
 // every component (peaks first, then background), the amplitude followed
@@ -175,10 +188,10 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
     for (size_t i = 0; i < slots.size(); ++i)
     {
         const ComponentSlot& slot = slots[i];
-        ShapeKind kind = slot.component->shape;
+        const FitComponent* component = slot.component;
         int shapeCount = slot.shapeCount;
-        auto shapeOnly = [kind, shapeCount, pivot](double* xs, double* p) {
-            return ShapeValue(kind, p, shapeCount, xs[0], pivot);
+        auto shapeOnly = [component, shapeCount, pivot](double* xs, double* p) {
+            return SlotShapeValue(*component, p, shapeCount, xs[0], pivot);
         };
         auto function = std::make_unique<TF1>(
             ("normsum_" + slot.component->label).c_str(), shapeOnly, range.min, range.max, shapeCount);
@@ -289,24 +302,31 @@ std::vector<std::string> CollectWarnings(const FitModel& fitted, const FitResult
     for (size_t i = 0; i < fitted.peaks.size() && i < result.peaks.size(); ++i)
     {
         const FitComponent& peak = fitted.peaks[i];
-        double center = 0.0;
-        double width = 0.0; // a 3-sigma-like half width
-        if (peak.shape == ShapeKind::Gaussian && peak.parameters.size() >= 2)
-        {
-            center = peak.parameters[0].value;
-            width = 3.0 * std::abs(peak.parameters[1].value);
-        }
-        else if (peak.shape == ShapeKind::Lorentzian && peak.parameters.size() >= 2)
-        {
-            center = peak.parameters[0].value;
-            width = 3.0 * std::abs(peak.parameters[1].value);
-        }
-        else
+        if (peak.parameters.size() < 2)
         {
             continue;
         }
+        double center = peak.parameters[0].value;
+        double width = 3.0 * std::abs(peak.parameters[1].value); // a 3-sigma-like half width
+        double lowReach = width;
+        switch (peak.shape)
+        {
+            case ShapeKind::Gaussian:
+            case ShapeKind::Lorentzian:
+            case ShapeKind::Voigt:
+                break;
+            case ShapeKind::GaussianTail:
+                // The low-energy tail reaches further down.
+                if (peak.parameters.size() >= 4)
+                {
+                    lowReach = width + 3.0 * std::abs(peak.parameters[3].value);
+                }
+                break;
+            default:
+                continue;
+        }
 
-        if (center - width < range.min || center + width > range.max)
+        if (center - lowReach < range.min || center + width > range.max)
         {
             warnings.push_back(peak.label + " extends past the fit range; its counts cover only the in-range part");
         }
@@ -374,19 +394,45 @@ FitResult RootFitEngine::Fit(const HistogramData& histogram, const FitModel& mod
         result.message = "the fit range is empty";
         return result;
     }
+    // Every shape must be evaluable; custom formulas are validated here so
+    // a bad one fails with a clear message instead of a broken fit.
+    auto checkComponent = [&result](const FitComponent& component) {
+        if (component.shape == ShapeKind::Custom)
+        {
+            FormulaCheckResult check = ValidateFormula(component.formula);
+            if (!check.valid)
+            {
+                result.message = component.label + ": " + check.message;
+                return false;
+            }
+            if (check.parameterCount != static_cast<int>(component.parameters.size()))
+            {
+                result.message = component.label + ": the formula uses "
+                                 + std::to_string(check.parameterCount) + " parameters but "
+                                 + std::to_string(component.parameters.size()) + " are defined";
+                return false;
+            }
+            return true;
+        }
+        if (!ShapeIsImplemented(component.shape))
+        {
+            result.message = std::string("shape \"") + ShapeKindName(component.shape)
+                             + "\" is not supported yet";
+            return false;
+        }
+        return true;
+    };
     for (const FitComponent& peak : model.peaks)
     {
-        if (!ShapeIsImplemented(peak.shape))
+        if (!checkComponent(peak))
         {
-            result.message = std::string("shape \"") + ShapeKindName(peak.shape) + "\" is not supported yet";
             return result;
         }
     }
     for (const FitComponent& component : model.background)
     {
-        if (!ShapeIsImplemented(component.shape))
+        if (!checkComponent(component))
         {
-            result.message = std::string("shape \"") + ShapeKindName(component.shape) + "\" is not supported yet";
             return result;
         }
     }
@@ -415,8 +461,8 @@ FitResult RootFitEngine::Fit(const HistogramData& histogram, const FitModel& mod
             for (const ComponentSlot& slot : slots)
             {
                 density += p[slot.amplitudeIndex]
-                           * ShapeValue(slot.component->shape, p + slot.firstShapeIndex,
-                                        slot.shapeCount, x, pivot);
+                           * SlotShapeValue(*slot.component, p + slot.firstShapeIndex,
+                                            slot.shapeCount, x, pivot);
             }
             return density * BinWidthAt(histogram, x);
         };

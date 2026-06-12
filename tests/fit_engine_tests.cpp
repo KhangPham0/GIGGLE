@@ -5,6 +5,7 @@
 #include <random>
 
 #include "core/Shapes.h"
+#include "rootbridge/FormulaSupport.h"
 #include "rootbridge/RootFitEngine.h"
 
 using namespace giggle;
@@ -295,7 +296,73 @@ TEST_CASE("the result warns when a peak leaves the range or a parameter hits a b
     }
 }
 
-TEST_CASE("unsupported shapes and empty models fail gracefully")
+TEST_CASE("a tailed peak fits end to end with calibrated counts")
+{
+    // A toy generated from a tailed gaussian truth, built with the same
+    // core math the engine uses.
+    FitComponent truth;
+    truth.shape = ShapeKind::GaussianTail;
+    truth.amplitude = { "amplitude", 66.0, false, std::nullopt, std::nullopt };
+    truth.parameters = {
+        { "mean", 50.0, false, std::nullopt, std::nullopt },
+        { "sigma", 3.0, false, std::nullopt, std::nullopt },
+        { "tail_fraction", 0.3, false, std::nullopt, std::nullopt },
+        { "tail_length", 2.5, false, std::nullopt, std::nullopt },
+    };
+    FitRange fitRange{ kFitLo, kFitHi };
+    double truthCounts = ComponentCounts(truth, fitRange);
+
+    HistogramData data;
+    data.name = "tailed_toy";
+    const int binCount = 200;
+    for (int i = 0; i <= binCount; ++i)
+    {
+        data.binEdges.push_back(100.0 * i / binCount);
+    }
+    std::mt19937 rng(31);
+    for (int i = 0; i < binCount; ++i)
+    {
+        double expected = truth.amplitude.value
+                              * ShapeIntegral(truth, fitRange, data.binEdges[i], data.binEdges[i + 1])
+                          + 15.0 * (data.binEdges[i + 1] - data.binEdges[i]);
+        std::poisson_distribution<int> poisson(expected);
+        data.counts.push_back(poisson(rng));
+    }
+
+    FitModel model;
+    model.range = fitRange;
+    model.statistic = FitStatistic::PoissonLikelihood;
+
+    // Tail parameters are fixed, as in real gf3-style analyses: fitted
+    // freely on modest statistics they are degenerate with sigma (a short
+    // tail mimics a wider gaussian), and the cross-check rightly balks at
+    // such collapsed fits.
+    FitComponent peak = truth;
+    peak.label = "Peak 1";
+    peak.amplitude = { "amplitude", 50.0, false, 0.0, std::nullopt };
+    peak.parameters[0].value = 49.0; // mean
+    peak.parameters[1].value = 3.5;  // sigma
+    peak.parameters[2] = { "tail_fraction", 0.3, true, std::nullopt, std::nullopt };
+    peak.parameters[3] = { "tail_length", 2.5, true, std::nullopt, std::nullopt };
+    model.peaks.push_back(peak);
+
+    FitComponent background;
+    background.label = "Background";
+    background.shape = ShapeKind::Constant;
+    background.amplitude = { "amplitude", 12.0, false, 0.0, std::nullopt };
+    model.background.push_back(background);
+
+    RootFitEngine engine;
+    FitResult result = engine.Fit(data, model);
+
+    REQUIRE(result.converged);
+    CHECK(std::abs(result.peaks[0].counts.value - truthCounts)
+          < 5.0 * result.peaks[0].counts.error);
+    CHECK(result.normSumCheck.performed);
+    CHECK(result.normSumCheck.agreed);
+}
+
+TEST_CASE("bad custom formulas and empty models fail gracefully")
 {
     RootFitEngine engine;
     HistogramData data = GenerateToy(13);
@@ -304,9 +371,61 @@ TEST_CASE("unsupported shapes and empty models fail gracefully")
     empty.range = { kFitLo, kFitHi };
     CHECK(!engine.Fit(data, empty).converged);
 
+    // A custom shape with an empty formula is rejected with a clear message.
     FitModel custom = MakeToyModel();
     custom.peaks[0].shape = ShapeKind::Custom;
+    custom.peaks[0].formula.clear();
     FitResult result = engine.Fit(data, custom);
     CHECK(!result.converged);
-    CHECK(result.message.find("not supported") != std::string::npos);
+    CHECK(result.message.find("empty") != std::string::npos);
+}
+
+TEST_CASE("the formula validator rejects scales and accepts honest shapes")
+{
+    FormulaCheckResult good = ValidateFormula("1.0/(1.0+exp((x-[0])/[1]))");
+    CHECK(good.valid);
+    CHECK(good.parameterCount == 2);
+
+    // [0] only scales the formula: degenerate with the amplitude.
+    FormulaCheckResult scaled = ValidateFormula("[0]*exp(-0.5*((x-[1])/[2])^2)");
+    CHECK(!scaled.valid);
+    CHECK(scaled.message.find("[0]") != std::string::npos);
+
+    CHECK(!ValidateFormula("not a formula ((").valid);
+    CHECK(!ValidateFormula("").valid);
+    CHECK(!ValidateFormula("0*x").valid); // identically zero
+}
+
+TEST_CASE("voigt peaks and custom backgrounds fit end to end")
+{
+    InstallCustomShapeEvaluator();
+    RootFitEngine engine;
+    HistogramData data = GenerateToy(29);
+
+    // The Gaussian toy fitted with a Voigt: gamma should come out small
+    // and the counts should still match the truth.
+    FitModel voigtModel = MakeToyModel();
+    voigtModel.peaks[0].shape = ShapeKind::Voigt;
+    voigtModel.peaks[0].parameters.push_back({ "gamma", 0.3, false, 0.0, std::nullopt });
+    FitResult voigtResult = engine.Fit(data, voigtModel);
+    REQUIRE(voigtResult.converged);
+    CHECK(std::abs(voigtResult.peaks[0].counts.value - TruePeakYield())
+          < 5.0 * voigtResult.peaks[0].counts.error);
+    CHECK(voigtResult.normSumCheck.performed);
+    CHECK(voigtResult.normSumCheck.agreed);
+
+    // The linear background swapped for an equivalent custom formula
+    // (no overall scale: the amplitude provides it).
+    FitModel customModel = MakeToyModel();
+    customModel.background[0].shape = ShapeKind::Custom;
+    customModel.background[0].formula = "1.0+[0]*(x-50.0)";
+    customModel.background[0].parameters = {
+        { "p0", -0.003, false, std::nullopt, std::nullopt },
+    };
+    FitResult customResult = engine.Fit(data, customModel);
+    REQUIRE(customResult.converged);
+    CHECK(std::abs(customResult.peaks[0].counts.value - TruePeakYield())
+          < 5.0 * customResult.peaks[0].counts.error);
+    CHECK(customResult.normSumCheck.performed);
+    CHECK(customResult.normSumCheck.agreed);
 }

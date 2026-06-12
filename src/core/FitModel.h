@@ -23,12 +23,14 @@ struct FitParameter
 enum class ShapeKind
 {
     Gaussian,
+    GaussianTail, // gaussian + low-energy exponential tail (gf3/Hypermet style)
     Lorentzian,
     Voigt,
     Constant,
     Linear,
     Quadratic,
     Exponential,
+    Step, // smoothed step background (erfc), high on the low-energy side
     Custom, // user-provided formula
 };
 

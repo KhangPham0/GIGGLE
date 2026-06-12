@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <string>
 
 #include "imgui.h"
+#include "imgui_stdlib.h"
 
 #include "core/Shapes.h"
 
@@ -12,13 +14,151 @@ namespace giggle {
 
 namespace {
 
-// Shapes offered for the background section in this version. Peaks are
-// Gaussian-only until the palette grows.
+const ShapeKind kPeakShapes[] = {
+    ShapeKind::Gaussian,
+    ShapeKind::GaussianTail,
+    ShapeKind::Lorentzian,
+    ShapeKind::Voigt,
+    ShapeKind::Custom,
+};
+
 const ShapeKind kBackgroundShapes[] = {
     ShapeKind::Constant,
     ShapeKind::Linear,
     ShapeKind::Quadratic,
+    ShapeKind::Exponential,
+    ShapeKind::Gaussian,
+    ShapeKind::Step,
+    ShapeKind::Custom,
 };
+
+// A sensible default for a shape parameter created out of thin air.
+double DefaultParameterValue(const std::string& name, const FitRange& range)
+{
+    if (name == "mean" || name == "edge")
+    {
+        return (range.min + range.max) / 2.0;
+    }
+    if (name == "sigma")
+    {
+        return (range.max - range.min) / 12.0;
+    }
+    if (name == "gamma")
+    {
+        return (range.max - range.min) / 24.0;
+    }
+    if (name == "tail_fraction")
+    {
+        return 0.2; // a modest tail, as gf3 defaults suggest
+    }
+    if (name == "tail_length")
+    {
+        return (range.max - range.min) / 30.0;
+    }
+    if (name == "width")
+    {
+        return (range.max - range.min) / 100.0;
+    }
+    return 0.0;
+}
+
+// Changes a component's shape, carrying over what translates: the mean,
+// and a comparable width. Custom shapes keep their formula and wait for
+// Apply to define their parameters.
+void ConvertComponentShape(FitComponent& component, ShapeKind to, const FitRange& range)
+{
+    if (component.shape == to)
+    {
+        return;
+    }
+
+    auto currentValue = [&component](const char* name) -> std::optional<double> {
+        for (const FitParameter& parameter : component.parameters)
+        {
+            if (parameter.name == name)
+            {
+                return parameter.value;
+            }
+        }
+        return std::nullopt;
+    };
+
+    std::optional<double> mean = currentValue("mean");
+    // A sigma-like width: sigma directly, or gamma rescaled so the FWHM
+    // roughly carries over (gamma = 1.177 sigma at equal FWHM).
+    std::optional<double> width = currentValue("sigma");
+    if (!width.has_value())
+    {
+        std::optional<double> gamma = currentValue("gamma");
+        if (gamma.has_value())
+        {
+            width = gamma.value() / 1.177410023;
+        }
+    }
+
+    component.shape = to;
+    component.parameters.clear();
+    if (to == ShapeKind::Custom)
+    {
+        return; // parameters appear when the formula is applied
+    }
+    component.formula.clear();
+
+    for (const std::string& name : ShapeParameterNames(to))
+    {
+        double value = DefaultParameterValue(name, range);
+        if (name == "mean" && mean.has_value())
+        {
+            value = mean.value();
+        }
+        if (name == "sigma" && width.has_value())
+        {
+            value = width.value();
+        }
+        if (name == "gamma" && width.has_value())
+        {
+            value = to == ShapeKind::Voigt ? 0.5 * width.value() : 1.177410023 * width.value();
+        }
+        if (name == "tail_length" && width.has_value())
+        {
+            value = width.value(); // a tail about one sigma long to start
+        }
+
+        FitParameter parameter{ name, value, false, std::nullopt, std::nullopt };
+        if (name == "tail_fraction")
+        {
+            parameter.lowerBound = 0.0; // a fraction stays one
+            parameter.upperBound = 1.0;
+        }
+        if (name == "tail_length" || name == "width")
+        {
+            parameter.lowerBound = 0.0;
+        }
+        component.parameters.push_back(parameter);
+    }
+}
+
+// The shape selector for one component. Returns true when it changed.
+bool DrawShapeCombo(FitComponent& component, const ShapeKind* shapes, int shapeCount,
+                    const FitRange& range)
+{
+    bool changed = false;
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
+    if (ImGui::BeginCombo("##shape", ShapeKindName(component.shape)))
+    {
+        for (int i = 0; i < shapeCount; ++i)
+        {
+            bool selected = component.shape == shapes[i];
+            if (ImGui::Selectable(ShapeKindName(shapes[i]), selected) && !selected)
+            {
+                ConvertComponentShape(component, shapes[i], range);
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
 
 // The tallest bin within the range: the natural scale for new amplitudes.
 double MaxCountsInRange(const HistogramData& histogram, const FitRange& range)
@@ -47,7 +187,17 @@ FitComponent MakeDefaultBackground(ShapeKind shape, const FitRange& range,
     background.amplitude = { "amplitude", level / BinWidthAt(histogram, center), false, 0.0, std::nullopt };
     for (const std::string& name : ShapeParameterNames(shape))
     {
-        background.parameters.push_back({ name, 0.0, false, std::nullopt, std::nullopt });
+        // Slopes and curvatures start flat; a Gaussian background starts
+        // centered with a generous width.
+        double value = name == "slope" || name == "curvature"
+                           ? 0.0
+                           : DefaultParameterValue(name, range);
+        FitParameter parameter{ name, value, false, std::nullopt, std::nullopt };
+        if (name == "width")
+        {
+            parameter.lowerBound = 0.0;
+        }
+        background.parameters.push_back(parameter);
     }
     return background;
 }
@@ -64,7 +214,7 @@ float DragSpeedFor(double value)
 
 FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogram,
                                    bool fitRunning, bool canRevert, const Theme& theme,
-                                   ImFont* monoFont)
+                                   ImFont* monoFont, const FormulaValidator& validator)
 {
     FitPanelAction action;
 
@@ -77,8 +227,8 @@ FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogr
         else
         {
             DrawRangeSection(model, *histogram, monoFont);
-            DrawPeaksSection(model, *histogram, monoFont);
-            DrawBackgroundSection(model, *histogram, monoFont);
+            DrawPeaksSection(model, *histogram, monoFont, theme, validator);
+            DrawBackgroundSection(model, *histogram, monoFont, theme, validator);
             DrawStatisticSection(model);
 
             ImGui::Spacing();
@@ -151,7 +301,8 @@ void FitModelPanel::DrawRangeSection(FitModel& model, const HistogramData& histo
 }
 
 void FitModelPanel::DrawPeaksSection(FitModel& model, const HistogramData& histogram,
-                                     ImFont* monoFont)
+                                     ImFont* monoFont, const Theme& theme,
+                                     const FormulaValidator& validator)
 {
     if (!ImGui::CollapsingHeader("Peaks", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -170,7 +321,13 @@ void FitModelPanel::DrawPeaksSection(FitModel& model, const HistogramData& histo
         ImGui::PushID(static_cast<int>(i));
 
         ImGui::SeparatorText(peak.label.c_str());
-        DrawAmplitudeRow(peak, histogram, "height", monoFont);
+        DrawShapeCombo(peak, kPeakShapes, static_cast<int>(std::size(kPeakShapes)), model.range);
+        if (peak.shape == ShapeKind::Custom)
+        {
+            DrawFormulaEditor(peak, theme, validator);
+        }
+        DrawAmplitudeRow(peak, histogram, peak.shape == ShapeKind::Custom ? "amplitude" : "height",
+                         monoFont);
         for (FitParameter& parameter : peak.parameters)
         {
             DrawParameterRow(parameter, parameter.name.c_str(), monoFont);
@@ -202,7 +359,8 @@ void FitModelPanel::DrawPeaksSection(FitModel& model, const HistogramData& histo
 }
 
 void FitModelPanel::DrawBackgroundSection(FitModel& model, const HistogramData& histogram,
-                                          ImFont* monoFont)
+                                          ImFont* monoFont, const Theme& theme,
+                                          const FormulaValidator& validator)
 {
     if (!ImGui::CollapsingHeader("Background", ImGuiTreeNodeFlags_DefaultOpen))
     {
@@ -235,13 +393,74 @@ void FitModelPanel::DrawBackgroundSection(FitModel& model, const HistogramData& 
     {
         FitComponent& background = model.background.front();
         ImGui::PushID("background");
-        DrawAmplitudeRow(background, histogram, "level", monoFont);
+        if (background.shape == ShapeKind::Custom)
+        {
+            DrawFormulaEditor(background, theme, validator);
+        }
+        DrawAmplitudeRow(background, histogram,
+                         background.shape == ShapeKind::Custom ? "amplitude" : "level", monoFont);
         for (FitParameter& parameter : background.parameters)
         {
             DrawParameterRow(parameter, parameter.name.c_str(), monoFont);
         }
         ImGui::PopID();
     }
+}
+
+// The formula field with an Apply button. Applying validates the formula
+// and rebuilds the component's parameter list to match it; values of
+// parameters that keep their position survive.
+void FitModelPanel::DrawFormulaEditor(FitComponent& component, const Theme& theme,
+                                      const FormulaValidator& validator)
+{
+    ImGui::PushID("formula");
+
+    float buttonWidth = ImGui::CalcTextSize("Apply").x + ImGui::GetStyle().FramePadding.x * 4;
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - buttonWidth
+                            - ImGui::GetStyle().ItemSpacing.x);
+    ImGui::InputTextWithHint("##text", "formula of x, parameters [0], [1], ...",
+                             &component.formula);
+    ImGui::SameLine();
+    if (ImGui::Button("Apply"))
+    {
+        FormulaCheckResult check = validator ? validator(component.formula)
+                                             : FormulaCheckResult{ false, 0, "no validator available" };
+        m_formulaMessageOwner = &component;
+        m_formulaMessageIsError = !check.valid;
+        if (check.valid)
+        {
+            std::vector<FitParameter> parameters;
+            for (int i = 0; i < check.parameterCount; ++i)
+            {
+                double value = i < static_cast<int>(component.parameters.size())
+                                   ? component.parameters[i].value
+                                   : 1.0;
+                parameters.push_back({ "p" + std::to_string(i), value,
+                                       false, std::nullopt, std::nullopt });
+            }
+            component.parameters = std::move(parameters);
+            m_formulaMessage = check.parameterCount == 0
+                                   ? "valid, no parameters"
+                                   : "valid, " + std::to_string(check.parameterCount) + " parameter(s)";
+        }
+        else
+        {
+            m_formulaMessage = check.message;
+        }
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("The formula must not contain an overall scale\n"
+                          "parameter; the amplitude provides it.");
+    }
+
+    if (m_formulaMessageOwner == &component && !m_formulaMessage.empty())
+    {
+        ImGui::TextColored(m_formulaMessageIsError ? theme.statusError : theme.statusGood,
+                           "%s", m_formulaMessage.c_str());
+    }
+
+    ImGui::PopID();
 }
 
 void FitModelPanel::DrawStatisticSection(FitModel& model)
@@ -263,7 +482,8 @@ void FitModelPanel::DrawStatisticSection(FitModel& model)
 // component's counts per bin at its reference point ("height" of a peak,
 // "level" of a background). The conversion is the local bin width -- a
 // constant -- so the fix checkbox and future bounds act on exactly what
-// the user sees.
+// the user sees. Custom shapes have no reference point that equals 1, so
+// their amplitude shows raw.
 void FitModelPanel::DrawAmplitudeRow(FitComponent& component, const HistogramData& histogram,
                                      const char* label, ImFont* monoFont)
 {
@@ -278,7 +498,7 @@ void FitModelPanel::DrawAmplitudeRow(FitComponent& component, const HistogramDat
             break;
         }
     }
-    double binWidth = BinWidthAt(histogram, position);
+    double binWidth = component.shape == ShapeKind::Custom ? 1.0 : BinWidthAt(histogram, position);
 
     double display = component.amplitude.value * binWidth;
 

@@ -3,6 +3,7 @@
 # ROOT is linked privately, so a ROOT include leaking into another target
 # fails to compile.
 add_library(giggle_rootbridge STATIC
+    FormulaSupport.cpp
     RootFileSource.cpp
     RootFitEngine.cpp
 )

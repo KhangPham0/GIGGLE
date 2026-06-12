@@ -13,6 +13,38 @@ namespace giggle {
 
 namespace {
 
+// The half-max crossing distance from the mean in one direction, found
+// numerically; for the asymmetric tailed gaussian, whose two sides differ.
+double NumericHalfWidth(const FitComponent& peak, const FitRange& range, double mean,
+                        double direction)
+{
+    double scale = peak.parameters.size() > 1
+                       ? std::max(std::abs(peak.parameters[1].value), 1e-9)
+                       : 1.0;
+    double inside = 0.0;
+    double outside = scale;
+    int expansions = 0;
+    while (ShapeValue(peak, range, mean + direction * outside) > 0.5 && expansions < 50)
+    {
+        inside = outside;
+        outside *= 2.0;
+        ++expansions;
+    }
+    for (int i = 0; i < 40; ++i)
+    {
+        double middle = 0.5 * (inside + outside);
+        if (ShapeValue(peak, range, mean + direction * middle) > 0.5)
+        {
+            inside = middle;
+        }
+        else
+        {
+            outside = middle;
+        }
+    }
+    return 0.5 * (inside + outside);
+}
+
 // Half width at half maximum, in x-units, for the shapes that have one.
 double HalfWidthAtHalfMax(const FitComponent& peak)
 {
@@ -26,6 +58,17 @@ double HalfWidthAtHalfMax(const FitComponent& peak)
             return 1.177410023 * std::abs(peak.parameters[1].value); // sqrt(2 ln 2) sigma
         case ShapeKind::Lorentzian:
             return std::abs(peak.parameters[1].value); // gamma
+        case ShapeKind::Voigt:
+        {
+            // Olivero-Longbothum approximation, halved.
+            if (peak.parameters.size() < 3)
+            {
+                return 0.0;
+            }
+            double fG = 2.354820045 * std::abs(peak.parameters[1].value);
+            double fL = 2.0 * std::abs(peak.parameters[2].value);
+            return 0.5 * (0.5346 * fL + std::sqrt(0.2166 * fL * fL + fG * fG));
+        }
         default:
             return 0.0;
     }
@@ -45,6 +88,19 @@ void SetHalfWidthAtHalfMax(FitComponent& peak, double halfWidth)
         case ShapeKind::Lorentzian:
             peak.parameters[1].value = halfWidth;
             break;
+        case ShapeKind::Voigt:
+        {
+            // Scale sigma and gamma together so the profile keeps its
+            // Gaussian/Lorentzian character while changing width.
+            double current = HalfWidthAtHalfMax(peak);
+            if (current > 0.0 && peak.parameters.size() >= 3)
+            {
+                double factor = halfWidth / current;
+                peak.parameters[1].value *= factor;
+                peak.parameters[2].value *= factor;
+            }
+            break;
+        }
         default:
             break;
     }
@@ -275,23 +331,52 @@ void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram,
         }
 
         // Two half-maximum handles: drag horizontally to set the width.
-        double halfWidth = HalfWidthAtHalfMax(peak);
-        if (halfWidth > 0.0)
+        // The tailed gaussian is asymmetric, so its sides are located
+        // numerically and a drag scales sigma proportionally.
+        bool asymmetric = peak.shape == ShapeKind::GaussianTail;
+        double leftWidth = asymmetric ? NumericHalfWidth(peak, model.range, mean->value, -1.0)
+                                      : HalfWidthAtHalfMax(peak);
+        double rightWidth = asymmetric ? NumericHalfWidth(peak, model.range, mean->value, +1.0)
+                                       : leftWidth;
+        if (leftWidth > 0.0 && rightWidth > 0.0)
         {
             double halfY = 0.5 * peak.amplitude.value * binWidth;
 
-            double leftX = mean->value - halfWidth;
+            auto scaleSigma = [&peak](double factor) {
+                if (peak.parameters.size() > 1 && factor > 0.0)
+                {
+                    peak.parameters[1].value *= factor;
+                }
+            };
+
+            double leftX = mean->value - leftWidth;
             double leftY = halfY;
             if (ImPlot::DragPoint(baseId + 1, &leftX, &leftY, color, 4.0f))
             {
-                SetHalfWidthAtHalfMax(peak, std::abs(mean->value - leftX));
+                double dragged = std::abs(mean->value - leftX);
+                if (asymmetric)
+                {
+                    scaleSigma(dragged / leftWidth);
+                }
+                else
+                {
+                    SetHalfWidthAtHalfMax(peak, dragged);
+                }
             }
 
-            double rightX = mean->value + halfWidth;
+            double rightX = mean->value + rightWidth;
             double rightY = halfY;
             if (ImPlot::DragPoint(baseId + 2, &rightX, &rightY, color, 4.0f))
             {
-                SetHalfWidthAtHalfMax(peak, std::abs(rightX - mean->value));
+                double dragged = std::abs(rightX - mean->value);
+                if (asymmetric)
+                {
+                    scaleSigma(dragged / rightWidth);
+                }
+                else
+                {
+                    SetHalfWidthAtHalfMax(peak, dragged);
+                }
             }
         }
     }

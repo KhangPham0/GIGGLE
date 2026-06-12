@@ -17,14 +17,16 @@ struct ShapeEntry
 const std::vector<ShapeEntry>& ShapeTable()
 {
     static const std::vector<ShapeEntry> table = {
-        { ShapeKind::Gaussian,    "gaussian",    { "mean", "sigma" } },
-        { ShapeKind::Lorentzian,  "lorentzian",  { "mean", "gamma" } },
-        { ShapeKind::Voigt,       "voigt",       { "mean", "sigma", "gamma" } },
-        { ShapeKind::Constant,    "constant",    {} },
-        { ShapeKind::Linear,      "linear",      { "slope" } },
-        { ShapeKind::Quadratic,   "quadratic",   { "slope", "curvature" } },
-        { ShapeKind::Exponential, "exponential", { "slope" } },
-        { ShapeKind::Custom,      "custom",      {} },
+        { ShapeKind::Gaussian,     "gaussian",      { "mean", "sigma" } },
+        { ShapeKind::GaussianTail, "gaussian_tail", { "mean", "sigma", "tail_fraction", "tail_length" } },
+        { ShapeKind::Lorentzian,   "lorentzian",    { "mean", "gamma" } },
+        { ShapeKind::Voigt,        "voigt",         { "mean", "sigma", "gamma" } },
+        { ShapeKind::Constant,     "constant",      {} },
+        { ShapeKind::Linear,       "linear",        { "slope" } },
+        { ShapeKind::Quadratic,    "quadratic",     { "slope", "curvature" } },
+        { ShapeKind::Exponential,  "exponential",   { "slope" } },
+        { ShapeKind::Step,         "step",          { "edge", "width" } },
+        { ShapeKind::Custom,       "custom",        {} },
     };
     return table;
 }

@@ -1,6 +1,7 @@
 #ifndef GIGGLE_CORE_SHAPES_H
 #define GIGGLE_CORE_SHAPES_H
 
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -20,19 +21,44 @@ namespace giggle {
 // Every shape is 1 at its reference point, so amplitude * shape is a
 // density whose value there is the amplitude itself:
 //
-//   gaussian     exp(-(x - mean)^2 / (2 sigma^2))           = 1 at mean
-//   lorentzian   1 / (1 + ((x - mean) / gamma)^2)           = 1 at mean
-//   constant     1
-//   linear       1 + slope * (x - pivot)                    = 1 at pivot
-//   quadratic    1 + slope * (x - pivot)
-//                  + curvature * (x - pivot)^2              = 1 at pivot
-//   exponential  exp(slope * (x - pivot))                   = 1 at pivot
+//   gaussian       exp(-(x - mean)^2 / (2 sigma^2))         = 1 at mean
+//   gaussian_tail  the gf3/Hypermet lineshape: a gaussian
+//                  blended with a low-energy exponential
+//                  tail (the gaussian convolved with a
+//                  left-sided exponential of decay length
+//                  tail_length, mixed in with weight
+//                  tail_fraction), scaled by its value at
+//                  the mean                                  = 1 at mean
+//   lorentzian     1 / (1 + ((x - mean) / gamma)^2)         = 1 at mean
+//   voigt          Voigt(x - mean; sigma, gamma),
+//                  scaled by its own central value           = 1 at mean
+//   constant       1
+//   linear         1 + slope * (x - pivot)                  = 1 at pivot
+//   quadratic      1 + slope * (x - pivot)
+//                    + curvature * (x - pivot)^2            = 1 at pivot
+//   exponential    exp(slope * (x - pivot))                 = 1 at pivot
+//   step           erfc((x - edge) / (sqrt 2 width)) / 2    = 1 on its
+//                  low-energy plateau (not at the pivot:
+//                  the level of a step means the plateau)
 //
-// Voigt and custom shapes are not implemented here yet; they evaluate to 0
-// (no preview curve until they are).
+// The Voigt profile uses Humlicek's rational approximation of the Faddeeva
+// function (relative accuracy ~1e-4, ample for lineshapes); its integral
+// has no closed form and is computed numerically.
+//
+// Custom shapes are evaluated through a hook installed at startup (the
+// ROOT TFormula evaluator from rootbridge); without it they evaluate to 0.
 
-// True when ShapeValue/ShapeIntegral can evaluate this kind.
+// True when ShapeValue/ShapeIntegral can evaluate this kind without help.
+// Custom shapes need the evaluator hook below.
 bool ShapeIsImplemented(ShapeKind kind);
+
+// Evaluates a custom component's formula at x (the component carries the
+// formula string and the current parameter values). Installed once at
+// startup by main, implemented with ROOT's TFormula in rootbridge so core
+// stays ROOT-free.
+using CustomShapeEvaluator = std::function<double(const FitComponent&, double)>;
+void SetCustomShapeEvaluator(CustomShapeEvaluator evaluator);
+bool HasCustomShapeEvaluator();
 
 // The unit-amplitude shape value at x. The raw-array forms exist so the
 // fit engine can evaluate shapes without building FitComponent objects;

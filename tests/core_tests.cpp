@@ -113,9 +113,10 @@ TEST_CASE("HistogramData rejects inconsistent contents")
 TEST_CASE("shape names round-trip and carry their parameter lists")
 {
     const ShapeKind allKinds[] = {
-        ShapeKind::Gaussian, ShapeKind::Lorentzian, ShapeKind::Voigt,
-        ShapeKind::Constant, ShapeKind::Linear,     ShapeKind::Quadratic,
-        ShapeKind::Exponential, ShapeKind::Custom,
+        ShapeKind::Gaussian, ShapeKind::GaussianTail, ShapeKind::Lorentzian,
+        ShapeKind::Voigt,    ShapeKind::Constant,     ShapeKind::Linear,
+        ShapeKind::Quadratic, ShapeKind::Exponential, ShapeKind::Step,
+        ShapeKind::Custom,
     };
     for (ShapeKind kind : allKinds)
     {
@@ -136,7 +137,12 @@ TEST_CASE("every shape is 1 at its reference point, so amplitude = density there
     double pivot = RangePivot(range);
 
     CHECK(ShapeValue(MakeComponent(ShapeKind::Gaussian, 1, { 150.0, 5.0 }), range, 150.0) == doctest::Approx(1.0));
+    CHECK(ShapeValue(MakeComponent(ShapeKind::GaussianTail, 1, { 150.0, 5.0, 0.3, 8.0 }), range, 150.0) == doctest::Approx(1.0));
     CHECK(ShapeValue(MakeComponent(ShapeKind::Lorentzian, 1, { 170.0, 4.0 }), range, 170.0) == doctest::Approx(1.0));
+    // The step is 1 on its low-energy plateau.
+    CHECK(ShapeValue(MakeComponent(ShapeKind::Step, 1, { 175.0, 2.0 }), range, 120.0) == doctest::Approx(1.0));
+    CHECK(ShapeValue(MakeComponent(ShapeKind::Step, 1, { 175.0, 2.0 }), range, 175.0) == doctest::Approx(0.5));
+    CHECK(ShapeValue(MakeComponent(ShapeKind::Step, 1, { 175.0, 2.0 }), range, 240.0) == doctest::Approx(0.0));
     CHECK(ShapeValue(MakeComponent(ShapeKind::Constant, 1, {}), range, pivot) == doctest::Approx(1.0));
     CHECK(ShapeValue(MakeComponent(ShapeKind::Linear, 1, { -0.002 }), range, pivot) == doctest::Approx(1.0));
     CHECK(ShapeValue(MakeComponent(ShapeKind::Quadratic, 1, { -0.002, 1e-5 }), range, pivot) == doctest::Approx(1.0));
@@ -169,11 +175,14 @@ TEST_CASE("component counts match the numeric integral of the density")
     const FitComponent cases[] = {
         MakeComponent(ShapeKind::Gaussian, 66.0, { 150.0, 5.0 }),
         MakeComponent(ShapeKind::Gaussian, 66.0, { 245.0, 8.0 }),
+        MakeComponent(ShapeKind::GaussianTail, 66.0, { 150.0, 5.0, 0.3, 8.0 }),
+        MakeComponent(ShapeKind::GaussianTail, 66.0, { 150.0, 5.0, 0.9, 20.0 }), // heavy tail
         MakeComponent(ShapeKind::Lorentzian, 40.0, { 175.0, 4.0 }),
         MakeComponent(ShapeKind::Constant, 3.3, {}),
         MakeComponent(ShapeKind::Linear, 13.0, { -0.002 }),
         MakeComponent(ShapeKind::Quadratic, 13.0, { -0.002, 1e-5 }),
         MakeComponent(ShapeKind::Exponential, 13.0, { -0.01 }),
+        MakeComponent(ShapeKind::Step, 13.0, { 175.0, 2.0 }),
     };
     for (const FitComponent& component : cases)
     {
@@ -506,6 +515,135 @@ TEST_CASE("peak labels keep counting upward")
     peak.label = "Peak 7";
     peaks.push_back(peak);
     CHECK(NextPeakLabel(peaks) == "Peak 8");
+}
+
+TEST_CASE("the voigt profile behaves at its limits and in between")
+{
+    FitRange range{ 0.0, 300.0 };
+
+    // Center value is 1 by construction.
+    FitComponent voigt = MakeComponent(ShapeKind::Voigt, 10.0, { 150.0, 3.0, 1.5 });
+    CHECK(ShapeValue(voigt, range, 150.0) == doctest::Approx(1.0));
+
+    // gamma -> 0: agrees with the Gaussian.
+    FitComponent nearlyGauss = MakeComponent(ShapeKind::Voigt, 1.0, { 150.0, 3.0, 1e-15 });
+    FitComponent gauss = MakeComponent(ShapeKind::Gaussian, 1.0, { 150.0, 3.0 });
+    for (double x : { 145.0, 150.0, 153.0, 160.0 })
+    {
+        CHECK(ShapeValue(nearlyGauss, range, x)
+              == doctest::Approx(ShapeValue(gauss, range, x)).epsilon(1e-3));
+    }
+
+    // sigma -> 0: agrees with the Lorentzian.
+    FitComponent nearlyLorentz = MakeComponent(ShapeKind::Voigt, 1.0, { 150.0, 1e-15, 2.0 });
+    FitComponent lorentz = MakeComponent(ShapeKind::Lorentzian, 1.0, { 150.0, 2.0 });
+    for (double x : { 145.0, 150.0, 153.0, 160.0 })
+    {
+        CHECK(ShapeValue(nearlyLorentz, range, x)
+              == doctest::Approx(ShapeValue(lorentz, range, x)).epsilon(1e-3));
+    }
+
+    // The numeric integral makes counts work like any other shape:
+    // N = A * integral, checked against a trapezoid sum of the density.
+    double counts = ComponentCounts(voigt, range);
+    double sum = 0.0;
+    int steps = 4000;
+    double dx = (range.max - range.min) / steps;
+    for (int i = 0; i < steps; ++i)
+    {
+        sum += ComponentDensity(voigt, range, range.min + (i + 0.5) * dx) * dx;
+    }
+    CHECK(counts == doctest::Approx(sum).epsilon(1e-4));
+
+    // The FWHM approximation lands where the shape really crosses half max.
+    ComponentResult fitted;
+    fitted.parameters = { { 150.0, 0.0 }, { 3.0, 0.1 }, { 1.5, 0.1 } };
+    auto fwhm = PeakFWHM(ShapeKind::Voigt, fitted);
+    REQUIRE(fwhm.has_value());
+    double half = ShapeValue(voigt, range, 150.0 + fwhm->value / 2.0);
+    CHECK(half == doctest::Approx(0.5).epsilon(0.01));
+    CHECK(fwhm->error > 0.0);
+}
+
+TEST_CASE("the tailed gaussian reduces to the gaussian and reports an honest FWHM")
+{
+    FitRange range{ 100.0, 250.0 };
+
+    // tail_fraction -> 0: identical to the pure gaussian everywhere.
+    FitComponent noTail = MakeComponent(ShapeKind::GaussianTail, 1.0, { 150.0, 5.0, 0.0, 8.0 });
+    FitComponent gauss = MakeComponent(ShapeKind::Gaussian, 1.0, { 150.0, 5.0 });
+    for (double x : { 130.0, 145.0, 150.0, 160.0, 180.0 })
+    {
+        CHECK(ShapeValue(noTail, range, x)
+              == doctest::Approx(ShapeValue(gauss, range, x)).epsilon(1e-9));
+    }
+
+    // FWHM without a tail matches the gaussian formula; with a tail the
+    // numeric crossings sit exactly at half maximum, left side wider.
+    ComponentResult fitted;
+    fitted.parameters = { { 150.0, 0.0 }, { 5.0, 0.1 }, { 0.0, 0.0 }, { 8.0, 0.0 } };
+    auto noTailFwhm = PeakFWHM(ShapeKind::GaussianTail, fitted);
+    REQUIRE(noTailFwhm.has_value());
+    CHECK(noTailFwhm->value == doctest::Approx(2.354820045 * 5.0).epsilon(1e-6));
+
+    fitted.parameters = { { 150.0, 0.0 }, { 5.0, 0.1 }, { 0.4, 0.05 }, { 8.0, 0.5 } };
+    auto tailedFwhm = PeakFWHM(ShapeKind::GaussianTail, fitted);
+    REQUIRE(tailedFwhm.has_value());
+    CHECK(tailedFwhm->value > 2.354820045 * 5.0); // the tail widens the peak
+    CHECK(tailedFwhm->error > 0.0);
+
+    // The FWHM is the distance between the actual half-max crossings: find
+    // them by bisection on the shape and compare.
+    FitComponent tailed = MakeComponent(ShapeKind::GaussianTail, 1.0, { 150.0, 5.0, 0.4, 8.0 });
+    auto crossing = [&](double direction) {
+        double inside = 0.0;
+        double outside = 5.0;
+        while (ShapeValue(tailed, range, 150.0 + direction * outside) > 0.5)
+        {
+            inside = outside;
+            outside *= 2.0;
+        }
+        for (int i = 0; i < 60; ++i)
+        {
+            double middle = 0.5 * (inside + outside);
+            (ShapeValue(tailed, range, 150.0 + direction * middle) > 0.5 ? inside : outside) = middle;
+        }
+        return 0.5 * (inside + outside);
+    };
+    double leftWidth = crossing(-1.0);
+    double rightWidth = crossing(+1.0);
+    CHECK(leftWidth > rightWidth); // the tail is on the low-energy side
+    CHECK(tailedFwhm->value == doctest::Approx(leftWidth + rightWidth).epsilon(1e-6));
+}
+
+TEST_CASE("custom shapes flow through the evaluator hook")
+{
+    // A stand-in evaluator: a triangle shape, no ROOT needed in core tests.
+    SetCustomShapeEvaluator([](const FitComponent& component, double x) {
+        double center = component.parameters.empty() ? 0.0 : component.parameters[0].value;
+        double width = component.parameters.size() > 1 ? component.parameters[1].value : 1.0;
+        double distance = std::abs(x - center);
+        return distance < width ? 1.0 - distance / width : 0.0;
+    });
+    CHECK(HasCustomShapeEvaluator());
+
+    FitRange range{ 0.0, 100.0 };
+    FitComponent triangle;
+    triangle.shape = ShapeKind::Custom;
+    triangle.formula = "(unused by the stand-in)";
+    triangle.amplitude = { "amplitude", 6.0, false, std::nullopt, std::nullopt };
+    triangle.parameters = {
+        { "p0", 50.0, false, std::nullopt, std::nullopt },
+        { "p1", 10.0, false, std::nullopt, std::nullopt },
+    };
+
+    CHECK(ComponentDensity(triangle, range, 50.0) == doctest::Approx(6.0));
+    CHECK(ComponentDensity(triangle, range, 55.0) == doctest::Approx(3.0));
+    // Triangle area: width * peak = 10 * 6 = 60.
+    CHECK(ComponentCounts(triangle, range) == doctest::Approx(60.0).epsilon(1e-3));
+
+    SetCustomShapeEvaluator(nullptr);
+    CHECK(ComponentDensity(triangle, range, 50.0) == 0.0);
 }
 
 TEST_CASE("version is defined")
