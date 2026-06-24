@@ -137,6 +137,7 @@ int App::Run()
         }
     }
 
+    SaveWindowState();
     Shutdown();
     return 0;
 }
@@ -155,17 +156,36 @@ bool App::Init()
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 
-    // Size the window in screen coordinates, scaled for the monitor's DPI.
-    float scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor());
-    int width = static_cast<int>(1280 * scale);
-    int height = static_cast<int>(800 * scale);
+    // First run: 80% of the monitor's work area (the screen minus the menu
+    // bar and dock), centered, so all four panels have room. Later runs:
+    // the size and place the window was left at. Stay hidden until
+    // positioned to avoid a jump. The work area is already in screen
+    // coordinates, so no DPI scaling is applied here.
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    float scale = ImGui_ImplGlfw_GetContentScaleForMonitor(monitor);
+    int workX = 0;
+    int workY = 0;
+    int workWidth = 1280;
+    int workHeight = 800;
+    glfwGetMonitorWorkarea(monitor, &workX, &workY, &workWidth, &workHeight);
 
+    int width = static_cast<int>(workWidth * 0.8f);
+    int height = static_cast<int>(workHeight * 0.8f);
+    int posX = workX + (workWidth - width) / 2;
+    int posY = workY + (workHeight - height) / 2;
+
+    m_windowStateFilePath = (ExecutableDirectory() / "window.ini").string();
+    LoadWindowState(width, height, posX, posY);
+
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     m_window = glfwCreateWindow(width, height, "GIGGLE", nullptr, nullptr);
     if (m_window == nullptr)
     {
         glfwTerminate();
         return false;
     }
+    glfwSetWindowPos(m_window, posX, posY);
+    glfwShowWindow(m_window);
     glfwMakeContextCurrent(m_window);
     glfwSwapInterval(1); // vsync
 
@@ -835,6 +855,98 @@ void App::BuildDefaultLayout(unsigned int dockspaceId)
     ImGui::DockBuilderDockWindow(ResultsPanel::Title, bottom);
 
     ImGui::DockBuilderFinish(dockspaceId);
+}
+
+// Replaces the passed-in defaults with the saved geometry, when a valid
+// window.ini exists. A bad or missing file leaves the defaults untouched.
+//
+// The saved position is validated against the monitors actually connected
+// now: if it was saved on an external display that is no longer attached,
+// the window would otherwise open off-screen and be unreachable. In that
+// case the same size is re-centered on an available monitor instead.
+void App::LoadWindowState(int& width, int& height, int& posX, int& posY)
+{
+    std::ifstream file(m_windowStateFilePath);
+    int w = 0;
+    int h = 0;
+    int x = 0;
+    int y = 0;
+    if (!(file >> w >> h >> x >> y) || w < 400 || h < 300 || w > 20000 || h > 20000)
+    {
+        return; // missing or garbage: keep the centered 80% default
+    }
+
+    // Find the connected monitor whose work area the saved window overlaps
+    // most. glfwGetMonitors lists the primary first, so a window that
+    // overlaps nothing falls back to being centered on the primary.
+    int monitorCount = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
+    if (monitorCount == 0)
+    {
+        return;
+    }
+
+    int bestOverlap = -1;
+    int areaX = 0;
+    int areaY = 0;
+    int areaW = 0;
+    int areaH = 0;
+    for (int i = 0; i < monitorCount; ++i)
+    {
+        int mx = 0;
+        int my = 0;
+        int mw = 0;
+        int mh = 0;
+        glfwGetMonitorWorkarea(monitors[i], &mx, &my, &mw, &mh);
+        int overlapX = std::min(x + w, mx + mw) - std::max(x, mx);
+        int overlapY = std::min(y + h, my + mh) - std::max(y, my);
+        int overlap = (overlapX > 0 && overlapY > 0) ? overlapX * overlapY : 0;
+        if (overlap > bestOverlap)
+        {
+            bestOverlap = overlap;
+            areaX = mx;
+            areaY = my;
+            areaW = mw;
+            areaH = mh;
+        }
+    }
+
+    // Never larger than the chosen monitor.
+    width = std::min(w, areaW);
+    height = std::min(h, areaH);
+
+    if (bestOverlap > 0)
+    {
+        // Visible on this monitor: keep the place, nudged fully on-screen.
+        posX = std::min(std::max(x, areaX), areaX + areaW - width);
+        posY = std::min(std::max(y, areaY), areaY + areaH - height);
+    }
+    else
+    {
+        // The monitor the window lived on is gone: same size, re-centered.
+        posX = areaX + (areaW - width) / 2;
+        posY = areaY + (areaH - height) / 2;
+    }
+}
+
+void App::SaveWindowState()
+{
+    if (m_window == nullptr)
+    {
+        return;
+    }
+    int width = 0;
+    int height = 0;
+    int posX = 0;
+    int posY = 0;
+    glfwGetWindowSize(m_window, &width, &height);
+    glfwGetWindowPos(m_window, &posX, &posY);
+
+    std::ofstream file(m_windowStateFilePath);
+    if (file)
+    {
+        file << width << " " << height << " " << posX << " " << posY << "\n";
+    }
 }
 
 void App::Shutdown()

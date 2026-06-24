@@ -56,6 +56,10 @@ private:
     void DrawAboutWindow();
     void DrawErrorPopup();
     void BuildDefaultLayout(unsigned int dockspaceId);
+    // Window geometry persistence: first run opens at a default size, later
+    // runs restore the size and place the window was left at.
+    void LoadWindowState(int& width, int& height, int& posX, int& posY);
+    void SaveWindowState();
     void Shutdown();
 
     void OpenFileDialog();
@@ -85,6 +89,7 @@ private:
     // The layout file lives next to the executable: GIGGLE keeps its files
     // with itself instead of scattering them over the user's machine.
     std::string m_layoutFilePath;
+    std::string m_windowStateFilePath;
 
     // Panel visibility; a hidden panel's dock space is reclaimed by the
     // plot until it returns.

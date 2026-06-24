@@ -164,6 +164,11 @@ void ApplyTheme(const Theme& t)
 
     plotStyle.MinorGridSize = ImVec2(1.0f, 1.0f);
     plotStyle.MajorGridSize = ImVec2(1.0f, 1.0f);
+
+    // A little breathing room when auto-fitting, so the tallest peak does
+    // not touch the top edge (and a touch on the sides). Less than the pan
+    // constraints, so a fitted view always sits comfortably inside them.
+    plotStyle.FitPadding = ImVec2(0.015f, 0.06f);
 }
 
 } // namespace giggle

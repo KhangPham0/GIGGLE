@@ -138,6 +138,20 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
         {
             m_requestAxesFit = true;
             m_lastDrawnName = histogram->name;
+
+            // The data's vertical extent, found once per histogram so the
+            // axis constraints below cost nothing per frame.
+            m_dataYMin = 0.0;
+            m_dataYMax = 0.0;
+            if (!histogram->counts.empty())
+            {
+                m_dataYMin = m_dataYMax = histogram->counts.front();
+                for (double count : histogram->counts)
+                {
+                    m_dataYMin = std::min(m_dataYMin, count);
+                    m_dataYMax = std::max(m_dataYMax, count);
+                }
+            }
         }
         if (m_requestAxesFit)
         {
@@ -153,6 +167,27 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
         {
             ImPlot::SetupAxes(nullptr, "counts");
             ImPlot::SetupAxisScale(ImAxis_Y1, m_logScaleY ? ImPlotScale_Log10 : ImPlotScale_Linear);
+
+            // Bound panning to the data plus a margin, so the view can't
+            // drift off into empty space on any side. The y-floor sits at 0
+            // for ordinary counts; only background-subtracted spectra (which
+            // go negative) get a margin below.
+            if (histogram != nullptr)
+            {
+                double xSpan = histogram->XMax() - histogram->XMin();
+                double xPad = xSpan > 0.0 ? 0.04 * xSpan : 1.0;
+                ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, histogram->XMin() - xPad,
+                                                   histogram->XMax() + xPad);
+
+                if (!m_logScaleY)
+                {
+                    bool nonNegative = m_dataYMin >= 0.0;
+                    double yFloor = nonNegative ? 0.0 : m_dataYMin;
+                    double yPad = m_dataYMax > yFloor ? 0.10 * (m_dataYMax - yFloor) : 1.0;
+                    double yLow = nonNegative ? 0.0 : m_dataYMin - yPad;
+                    ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, yLow, m_dataYMax + yPad);
+                }
+            }
 
             ImPlotRect visible = ImPlot::GetPlotLimits();
             m_viewLimits[0] = visible.X.Min;

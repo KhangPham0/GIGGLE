@@ -63,6 +63,8 @@ private:
     bool m_addPeakMode = false;
     bool m_binInspector = false;
     bool m_logScaleY = false;
+    double m_dataYMin = 0.0; // data extent, cached per histogram; bounds the
+    double m_dataYMax = 0.0; // y-axis so panning can't drift off the data
     bool m_requestAxesFit = false;
     bool m_openContextMenu = false;
     double m_contextMenuX = 0.0; // plot x where the context menu was opened
