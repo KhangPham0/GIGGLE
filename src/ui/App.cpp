@@ -6,8 +6,10 @@
 #include <fstream>
 
 #include "core/Serialization.h"
+#include "ui/fonts/IconsFontAwesome5.h"
 #include "core/Shapes.h"
-#include "ui/ImageExport.h"
+#include "core/Version.h"
+#include "ui/PlotRendering.h"
 
 #include "imgui.h"
 #include "imgui_internal.h" // DockBuilder API, used for the default layout
@@ -21,6 +23,14 @@
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
+#endif
+
+// The shortcut labels match the platform's modifier key. ImGui already
+// maps the actual behavior (ConfigMacOSXBehaviors); this fixes the labels.
+#ifdef __APPLE__
+#define GIGGLE_MOD "Cmd"
+#else
+#define GIGGLE_MOD "Ctrl"
 #endif
 
 namespace giggle {
@@ -66,6 +76,12 @@ void App::OpenFileOnStartup(const std::string& filePath)
     m_startupFile = filePath;
 }
 
+void App::ExportOnStartup(const std::string& histogram, const std::string& pngPath)
+{
+    m_startupExportHistogram = histogram;
+    m_startupExportPath = pngPath;
+}
+
 int App::Run()
 {
     if (!Init())
@@ -98,12 +114,27 @@ int App::Run()
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-        if (!m_pendingCapturePath.empty())
-        {
-            PerformPlotCapture();
-        }
-
         glfwSwapBuffers(m_window);
+
+        if (!m_startupExportHistogram.empty())
+        {
+            LoadHistogram(m_startupExportHistogram);
+            m_startupExportHistogram.clear();
+            m_startupExportSettleFrames = 2; // axis fitting settles at frame end
+            continue;
+        }
+        if (!m_startupExportPath.empty() && m_startupExportSettleFrames-- <= 0)
+        {
+            m_pendingExportPath = m_startupExportPath;
+            m_startupExportPath.clear();
+            m_exportOptions.width = 1920;
+            m_exportOptions.height = 1080;
+            glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+        }
+        if (!m_pendingExportPath.empty())
+        {
+            PerformPlotExport();
+        }
     }
 
     Shutdown();
@@ -216,7 +247,7 @@ void App::DrawFrame()
     }
     if (plotAction.savePlotRequested)
     {
-        RequestPlotCapture();
+        OpenExportDialog();
     }
 
     if (m_showFitModel)
@@ -266,6 +297,8 @@ void App::DrawFrame()
         }
     }
 
+    DrawExportDialog();
+    DrawAboutWindow();
     DrawErrorPopup();
 }
 
@@ -275,23 +308,23 @@ void App::DrawMainMenu()
     {
         if (ImGui::BeginMenu("File"))
         {
-            if (ImGui::MenuItem("Open..."))
+            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open..."))
             {
                 OpenFileDialog();
             }
             ImGui::Separator();
             ImGui::BeginDisabled(!m_histogram.has_value());
-            if (ImGui::MenuItem("Save Fit Preset..."))
+            if (ImGui::MenuItem(ICON_FA_SAVE "  Save Fit Preset..."))
             {
                 SavePreset();
             }
-            if (ImGui::MenuItem("Load Fit Preset..."))
+            if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Load Fit Preset..."))
             {
                 LoadPreset();
             }
-            if (ImGui::MenuItem("Export Plot as PNG..."))
+            if (ImGui::MenuItem(ICON_FA_IMAGE "  Export Plot as PNG..."))
             {
-                RequestPlotCapture();
+                OpenExportDialog();
             }
             ImGui::EndDisabled();
             ImGui::Separator();
@@ -303,9 +336,23 @@ void App::DrawMainMenu()
         }
         if (ImGui::BeginMenu("View"))
         {
-            ImGui::MenuItem(FileTreePanel::Title, "Ctrl+B", &m_showFileTree);
-            ImGui::MenuItem(FitModelPanel::Title, "Ctrl+J", &m_showFitModel);
+            ImGui::MenuItem(FileTreePanel::Title, GIGGLE_MOD "+B", &m_showFileTree);
+            ImGui::MenuItem(FitModelPanel::Title, GIGGLE_MOD "+J", &m_showFitModel);
             ImGui::MenuItem(ResultsPanel::Title, nullptr, &m_showResults);
+            ImGui::Separator();
+            // Font scale: bigger for screen sharing, back to 1 to reset.
+            if (ImGui::MenuItem("Larger text", GIGGLE_MOD "+="))
+            {
+                ChangeFontScale(+1);
+            }
+            if (ImGui::MenuItem("Smaller text", GIGGLE_MOD "+-"))
+            {
+                ChangeFontScale(-1);
+            }
+            if (ImGui::MenuItem("Reset text size", GIGGLE_MOD "+0"))
+            {
+                ChangeFontScale(0);
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Reset layout"))
             {
@@ -313,6 +360,14 @@ void App::DrawMainMenu()
                 m_showFitModel = true;
                 m_showResults = true;
                 m_needDefaultLayout = true;
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("About"))
+        {
+            if (ImGui::MenuItem(ICON_FA_INFO_CIRCLE "  About GIGGLE"))
+            {
+                m_showAbout = true;
             }
             ImGui::EndMenu();
         }
@@ -337,10 +392,36 @@ void App::HandleShortcuts()
     {
         m_showFitModel = !m_showFitModel;
     }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Equal))
+    {
+        ChangeFontScale(+1);
+    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Minus))
+    {
+        ChangeFontScale(-1);
+    }
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_0))
+    {
+        ChangeFontScale(0);
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_F, false))
     {
         StartFit();
     }
+}
+
+// Scales every font in the application; fonts re-rasterize sharply at the
+// new size (no blurry zoom). Direction +1/-1 steps, 0 resets.
+void App::ChangeFontScale(int direction)
+{
+    ImGuiStyle& style = ImGui::GetStyle();
+    if (direction == 0)
+    {
+        style.FontScaleMain = 1.0f;
+        return;
+    }
+    float scale = style.FontScaleMain + 0.1f * direction;
+    style.FontScaleMain = std::min(std::max(scale, 0.7f), 2.0f);
 }
 
 void App::AddPeakAt(double x)
@@ -352,6 +433,38 @@ void App::AddPeakAt(double x)
     FitComponent peak = SuggestGaussianPeak(m_histogram.value(), m_model.range, x);
     peak.label = NextPeakLabel(m_model.peaks);
     m_model.peaks.push_back(peak);
+}
+
+void App::DrawAboutWindow()
+{
+    if (!m_showAbout)
+    {
+        return;
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(440.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::Begin("About GIGGLE", &m_showAbout,
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking))
+    {
+        ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.5f);
+        ImGui::TextUnformatted("GIGGLE");
+        ImGui::PopFont();
+        ImGui::TextDisabled("Graphical Interface for Generating Gaussian Least-squares Estimates");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::Text("Version %s", Version());
+        ImGui::Spacing();
+        ImGui::TextWrapped(
+            "GIGGLE fits 1D spectra and extracts the counts in each peak with "
+            "honest uncertainties. Counts are integrals of the fitted shapes "
+            "over the fit range, with errors propagated through the covariance "
+            "matrix, and every converged fit is verified against an independent "
+            "re-fit of the same data.");
+        ImGui::Spacing();
+        ImGui::TextDisabled("Built on ROOT/Minuit2, Dear ImGui, and ImPlot.");
+    }
+    ImGui::End();
 }
 
 void App::DrawErrorPopup()
@@ -599,53 +712,108 @@ void App::LoadPreset()
     NFD_FreePathU8(selectedPath);
 }
 
-void App::RequestPlotCapture()
+void App::OpenExportDialog()
 {
-    std::string histogramName = std::filesystem::path(m_selectedHistogram).filename().string();
-    std::string defaultName = histogramName + "_plot.png";
-    std::string defaultDirectory = std::filesystem::path(m_sourceFilePath).parent_path().string();
-
-    nfdu8char_t* selectedPath = nullptr;
-    nfdu8filteritem_t filter = { "PNG", "png" };
-    nfdresult_t outcome = NFD_SaveDialogU8(&selectedPath, &filter, 1,
-                                           defaultDirectory.c_str(), defaultName.c_str());
-    if (outcome != NFD_OKAY)
+    if (!m_histogram.has_value())
     {
-        if (outcome == NFD_ERROR)
-        {
-            m_errorMessage = NFD_GetError();
-        }
+        return;
+    }
+    m_showExportDialog = true;
+}
+
+void App::DrawExportDialog()
+{
+    if (!m_showExportDialog)
+    {
         return;
     }
 
-    // The pixels are read at the end of this frame, after rendering.
-    m_pendingCapturePath = selectedPath;
-    NFD_FreePathU8(selectedPath);
+    ImGui::SetNextWindowSize(ImVec2(380.0f, 0.0f), ImGuiCond_Appearing);
+    if (ImGui::Begin("Export Plot", &m_showExportDialog,
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking))
+    {
+        ImGui::TextDisabled("The exported figure shows the view currently framed on screen.");
+        ImGui::Spacing();
+
+        ImGui::InputInt("width", &m_exportOptions.width);
+        ImGui::InputInt("height", &m_exportOptions.height);
+
+        if (ImGui::Button("1920 x 1080"))
+        {
+            m_exportOptions.width = 1920;
+            m_exportOptions.height = 1080;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("2560 x 1440"))
+        {
+            m_exportOptions.width = 2560;
+            m_exportOptions.height = 1440;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("3840 x 2160"))
+        {
+            m_exportOptions.width = 3840;
+            m_exportOptions.height = 2160;
+        }
+
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::SliderFloat("text & line scale", &m_exportOptions.emphasis, 0.0f, 4.0f,
+                           m_exportOptions.emphasis <= 0.0f ? "auto" : "%.1fx");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("auto scales with the export height, keeping the\n"
+                              "screen's proportions at any resolution");
+        }
+
+        ImGui::Spacing();
+        if (ImGui::Button(ICON_FA_IMAGE "  Export...", ImVec2(-1.0f, 0.0f)))
+        {
+            std::string histogramName = std::filesystem::path(m_selectedHistogram).filename().string();
+            std::string defaultName = histogramName + "_plot.png";
+            std::string defaultDirectory = std::filesystem::path(m_sourceFilePath).parent_path().string();
+
+            nfdu8char_t* selectedPath = nullptr;
+            nfdu8filteritem_t filter = { "PNG", "png" };
+            nfdresult_t outcome = NFD_SaveDialogU8(&selectedPath, &filter, 1,
+                                                   defaultDirectory.c_str(), defaultName.c_str());
+            if (outcome == NFD_OKAY)
+            {
+                m_pendingExportPath = selectedPath;
+                NFD_FreePathU8(selectedPath);
+                m_showExportDialog = false;
+            }
+            else if (outcome == NFD_ERROR)
+            {
+                m_errorMessage = NFD_GetError();
+            }
+        }
+    }
+    ImGui::End();
 }
 
-void App::PerformPlotCapture()
+void App::PerformPlotExport()
 {
-    // Window coordinates -> framebuffer pixels (retina displays differ).
-    int windowWidth = 0;
-    int windowHeight = 0;
-    glfwGetWindowSize(m_window, &windowWidth, &windowHeight);
-    int framebufferWidth = 0;
-    int framebufferHeight = 0;
-    glfwGetFramebufferSize(m_window, &framebufferWidth, &framebufferHeight);
-    float scale = windowWidth > 0 ? static_cast<float>(framebufferWidth) / windowWidth : 1.0f;
+    if (!m_histogram.has_value())
+    {
+        m_pendingExportPath.clear();
+        return;
+    }
 
-    const PanelRect& rect = m_plotPanel.WindowRect();
-    bool saved = SaveFramebufferRegionAsPng(m_pendingCapturePath.c_str(),
-                                            static_cast<int>(rect.x * scale),
-                                            static_cast<int>(rect.y * scale),
-                                            static_cast<int>(rect.width * scale),
-                                            static_cast<int>(rect.height * scale),
-                                            framebufferHeight);
+    // Frame the view the user sees on screen.
+    const double* limits = m_plotPanel.ViewLimits();
+    for (int i = 0; i < 4; ++i)
+    {
+        m_exportOptions.viewLimits[i] = limits[i];
+    }
+    m_exportOptions.logScaleY = m_plotPanel.LogScaleY();
+
+    bool saved = ExportPlotOffscreen(m_pendingExportPath, m_exportOptions,
+                                     m_histogram.value(), &m_model, m_theme, m_fonts.mono);
     if (!saved)
     {
-        m_errorMessage = "could not save the plot to " + m_pendingCapturePath;
+        m_errorMessage = "could not export the plot to " + m_pendingExportPath;
     }
-    m_pendingCapturePath.clear();
+    m_pendingExportPath.clear();
 }
 
 // The default three-pane layout: file tree left, plot center, fit model

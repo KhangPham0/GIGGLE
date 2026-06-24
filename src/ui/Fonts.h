@@ -8,10 +8,14 @@ namespace giggle {
 // The fonts GIGGLE uses, embedded in the binary so no files are needed at
 // runtime. Sizes are dynamic: pass a size to ImGui::PushFont when a
 // different size is needed.
+//
+// GIGGLE uses one typeface throughout: Cascadia Code Bold. It is
+// monospaced, so it serves both the interface text and the numeric
+// columns (counts, parameters, axis labels) where digits must align.
 struct Fonts
 {
-    ImFont* ui = nullptr;   // Inter: all interface text (the default font)
-    ImFont* mono = nullptr; // JetBrains Mono: numbers, tables, axis labels
+    ImFont* ui = nullptr;   // interface text (the default font)
+    ImFont* mono = nullptr; // numbers and tables (same face, aligned digits)
 };
 
 // Loads the embedded fonts into the ImGui font atlas. Call once at startup,

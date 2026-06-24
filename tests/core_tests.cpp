@@ -314,6 +314,15 @@ TEST_CASE("counts in range follow the fit's bin selection")
     counts = CountsInRange(histogram, { 1.0, 3.0 });
     CHECK(counts.value == 41.0);
     CHECK(counts.error == doctest::Approx(std::sqrt(4.0 + 9.0)));
+
+    // Region statistics: bin moments over the same selection. Bins at
+    // centers 1.5 (16 counts) and 2.5 (25 counts).
+    RegionStats stats = AnalyzeRange(histogram, { 1.0, 3.0 });
+    CHECK(stats.counts.value == 41.0);
+    double centroid = (16.0 * 1.5 + 25.0 * 2.5) / 41.0;
+    CHECK(stats.centroid == doctest::Approx(centroid));
+    double second = (16.0 * 1.5 * 1.5 + 25.0 * 2.5 * 2.5) / 41.0 - centroid * centroid;
+    CHECK(stats.rms == doctest::Approx(std::sqrt(second)));
 }
 
 TEST_CASE("FitModel survives a JSON round-trip unchanged")

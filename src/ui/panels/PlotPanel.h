@@ -45,8 +45,14 @@ public:
     // Where the plot window was drawn this frame, for the PNG capture.
     const PanelRect& WindowRect() const { return m_windowRect; }
 
+    // The axis ranges currently framed on screen (xmin, xmax, ymin, ymax)
+    // and the y-axis scale, so an export shows the same view.
+    const double* ViewLimits() const { return m_viewLimits; }
+    bool LogScaleY() const { return m_logScaleY; }
+
 private:
     void DrawHistogram(const HistogramData& histogram, const Theme& theme);
+    void DrawBinInspector(const HistogramData& histogram, const Theme& theme, ImFont* monoFont);
     void DrawRangeTools(FitModel& model, const HistogramData& histogram, const Theme& theme);
     void DrawModelCurves(const FitModel& model, const HistogramData& histogram, const Theme& theme);
     void DrawPeakHandles(FitModel& model, const HistogramData& histogram, const Theme& theme);
@@ -55,12 +61,14 @@ private:
     void DrawContextMenu(FitModel& model, const HistogramData& histogram, PlotAction& action);
 
     bool m_addPeakMode = false;
+    bool m_binInspector = false;
     bool m_logScaleY = false;
     bool m_requestAxesFit = false;
     bool m_openContextMenu = false;
     double m_contextMenuX = 0.0; // plot x where the context menu was opened
     std::string m_lastDrawnName; // to refit the axes when the histogram changes
     PanelRect m_windowRect;
+    double m_viewLimits[4] = { 0.0, 1.0, 0.0, 1.0 };
 };
 
 } // namespace giggle

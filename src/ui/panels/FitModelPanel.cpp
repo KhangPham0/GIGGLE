@@ -9,6 +9,7 @@
 #include "imgui_stdlib.h"
 
 #include "core/Shapes.h"
+#include "ui/fonts/IconsFontAwesome5.h"
 
 namespace giggle {
 
@@ -322,12 +323,12 @@ FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogr
             // Presets: the whole model as a JSON file, reusable across the
             // histograms of a measurement.
             float halfWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
-            if (ImGui::Button("Save preset...", ImVec2(halfWidth, 0.0f)))
+            if (ImGui::Button(ICON_FA_SAVE "  Save preset...", ImVec2(halfWidth, 0.0f)))
             {
                 action.savePresetRequested = true;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Load preset...", ImVec2(halfWidth, 0.0f)))
+            if (ImGui::Button(ICON_FA_FILE_IMPORT "  Load preset...", ImVec2(halfWidth, 0.0f)))
             {
                 action.loadPresetRequested = true;
             }
@@ -340,7 +341,8 @@ FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogr
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, theme.accentHover);
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, theme.accentActive);
             ImGui::PushStyleColor(ImGuiCol_Text, theme.windowBackground);
-            if (ImGui::Button(fitRunning ? "Fitting..." : "Fit", ImVec2(-1.0f, 0.0f)))
+            if (ImGui::Button(fitRunning ? ICON_FA_HOURGLASS_HALF "  Fitting..." : ICON_FA_PLAY "  Fit",
+                              ImVec2(-1.0f, 0.0f)))
             {
                 action.fitRequested = true;
             }
@@ -349,7 +351,7 @@ FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogr
 
             if (canRevert)
             {
-                if (ImGui::Button("Revert to pre-fit", ImVec2(-1.0f, 0.0f)))
+                if (ImGui::Button(ICON_FA_UNDO "  Revert to pre-fit", ImVec2(-1.0f, 0.0f)))
                 {
                     action.revertRequested = true;
                 }
@@ -429,7 +431,7 @@ void FitModelPanel::DrawPeaksSection(FitModel& model, const HistogramData& histo
         {
             DrawParameterRow(parameter, parameter.name.c_str(), monoFont);
         }
-        if (ImGui::SmallButton("Remove"))
+        if (ImGui::SmallButton(ICON_FA_TRASH "  Remove"))
         {
             removeIndex = static_cast<int>(i);
         }
@@ -442,7 +444,7 @@ void FitModelPanel::DrawPeaksSection(FitModel& model, const HistogramData& histo
     }
 
     ImGui::Spacing();
-    if (ImGui::Button("Add Peak", ImVec2(-1.0f, 0.0f)))
+    if (ImGui::Button(ICON_FA_PLUS "  Add Peak", ImVec2(-1.0f, 0.0f)))
     {
         FitComponent peak = SuggestGaussianPeak(histogram, model.range,
                                                 (model.range.min + model.range.max) / 2.0);

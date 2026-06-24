@@ -7,6 +7,7 @@
 #include "imgui.h"
 
 #include "core/Shapes.h"
+#include "ui/fonts/IconsFontAwesome5.h"
 
 namespace giggle {
 
@@ -40,9 +41,10 @@ ResultsAction ResultsPanel::Draw(const FitResult* result, const HistogramData* h
                          && model->range.max > model->range.min;
         if (haveRange)
         {
-            ValueWithError data = CountsInRange(*histogram, model->range);
+            RegionStats data = AnalyzeRange(*histogram, model->range);
             ImGui::PushFont(monoFont, 0.0f);
-            ImGui::Text("data in range   N = %10.6g +- %-8.4g", data.value, data.error);
+            ImGui::Text("data in range   N = %10.6g +- %-8.4g   centroid = %.6g   rms = %.4g",
+                        data.counts.value, data.counts.error, data.centroid, data.rms);
             if (result != nullptr)
             {
                 ImGui::Text("model total     N = %10.6g +- %-8.4g",
@@ -69,17 +71,17 @@ ResultsAction ResultsPanel::Draw(const FitResult* result, const HistogramData* h
             if (result->converged)
             {
                 ImGui::Spacing();
-                if (ImGui::Button("Save JSON..."))
+                if (ImGui::Button(ICON_FA_SAVE "  Save JSON..."))
                 {
                     action.saveJsonRequested = true;
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("Save CSV..."))
+                if (ImGui::Button(ICON_FA_SAVE "  Save CSV..."))
                 {
                     action.saveCsvRequested = true;
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("Copy CSV"))
+                if (ImGui::Button(ICON_FA_COPY "  Copy CSV"))
                 {
                     action.copyCsvRequested = true;
                 }

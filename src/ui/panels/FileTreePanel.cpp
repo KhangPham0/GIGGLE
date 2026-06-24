@@ -2,6 +2,8 @@
 
 #include "imgui.h"
 
+#include "ui/fonts/IconsFontAwesome5.h"
+
 namespace giggle {
 
 namespace {
@@ -48,7 +50,7 @@ FileTreeAction FileTreePanel::Draw(const std::string& selectedPath)
         {
             ImGui::TextDisabled("No file open.");
             ImGui::Spacing();
-            if (ImGui::Button("Open File..."))
+            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open File..."))
             {
                 action.openFileRequested = true;
             }

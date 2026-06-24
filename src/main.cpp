@@ -31,5 +31,11 @@ int main(int argc, char** argv)
         app.OpenFileOnStartup(argv[1]);
     }
 
+    // Scripted export: giggle file.root --export-plot histogram out.png
+    if (argc > 4 && std::string(argv[2]) == "--export-plot")
+    {
+        app.ExportOnStartup(argv[3], argv[4]);
+    }
+
     return app.Run();
 }

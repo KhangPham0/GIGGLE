@@ -681,6 +681,37 @@ FitComponent SuggestGaussianPeak(const HistogramData& histogram, const FitRange&
     return peak;
 }
 
+RegionStats AnalyzeRange(const HistogramData& histogram, const FitRange& range)
+{
+    RegionStats stats;
+    double variance = 0.0;
+    double weightedX = 0.0;
+    double weightedXX = 0.0;
+    for (int bin = 0; bin < histogram.BinCount(); ++bin)
+    {
+        double center = 0.5 * (histogram.binEdges[bin] + histogram.binEdges[bin + 1]);
+        if (center < range.min || center > range.max)
+        {
+            continue;
+        }
+        double weight = histogram.counts[bin];
+        stats.counts.value += weight;
+        double error = histogram.BinError(bin);
+        variance += error * error;
+        weightedX += weight * center;
+        weightedXX += weight * center * center;
+    }
+    stats.counts.error = std::sqrt(variance);
+
+    if (stats.counts.value > 0.0)
+    {
+        stats.centroid = weightedX / stats.counts.value;
+        double secondMoment = weightedXX / stats.counts.value - stats.centroid * stats.centroid;
+        stats.rms = secondMoment > 0.0 ? std::sqrt(secondMoment) : 0.0;
+    }
+    return stats;
+}
+
 FitCurves SampleModelCurves(const FitModel& model, int pointCount,
                             const HistogramData* histogramForUnits)
 {

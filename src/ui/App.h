@@ -13,6 +13,7 @@
 #include "core/FormulaValidator.h"
 #include "core/HistogramData.h"
 #include "core/SpectrumSource.h"
+#include "ui/PlotExport.h"
 #include "Fonts.h"
 #include "Theme.h"
 #include "panels/FileTreePanel.h"
@@ -39,6 +40,9 @@ public:
     // Makes the app open this file right after starting (command line use).
     void OpenFileOnStartup(const std::string& filePath);
 
+    // Command line mode: render this histogram to a PNG and exit.
+    void ExportOnStartup(const std::string& histogram, const std::string& pngPath);
+
     // Runs the application. Returns the process exit code.
     int Run();
 
@@ -47,7 +51,9 @@ private:
     void DrawFrame();
     void DrawMainMenu();
     void HandleShortcuts();
+    void ChangeFontScale(int direction);
     void AddPeakAt(double x);
+    void DrawAboutWindow();
     void DrawErrorPopup();
     void BuildDefaultLayout(unsigned int dockspaceId);
     void Shutdown();
@@ -64,8 +70,9 @@ private:
     void CopyResultsCsv();
     void SavePreset();
     void LoadPreset();
-    void RequestPlotCapture();
-    void PerformPlotCapture(); // runs after rendering, before the swap
+    void OpenExportDialog();
+    void DrawExportDialog();
+    void PerformPlotExport(); // runs between frames
 
     GLFWwindow* m_window = nullptr;
     Theme m_theme;
@@ -84,6 +91,7 @@ private:
     bool m_showFileTree = true;
     bool m_showFitModel = true;
     bool m_showResults = true;
+    bool m_showAbout = false;
 
     SourceFactory m_openSource;
     FormulaValidator m_formulaValidator;
@@ -112,8 +120,15 @@ private:
 
     std::string m_errorMessage; // non-empty: the error popup is shown
 
-    // A plot capture waiting for the end of the frame (empty: none).
-    std::string m_pendingCapturePath;
+    // The export dialog and a pending offscreen export (path empty: none).
+    bool m_showExportDialog = false;
+    PlotExportOptions m_exportOptions;
+    std::string m_pendingExportPath;
+
+    // Optional command line mode: export one histogram and exit.
+    std::string m_startupExportHistogram;
+    std::string m_startupExportPath;
+    int m_startupExportSettleFrames = 0;
 
     FileTreePanel m_fileTreePanel;
     PlotPanel m_plotPanel;

@@ -116,6 +116,17 @@ FitRange SnapRangeToBinEdges(const HistogramData& histogram, FitRange range);
 // the data.
 ValueWithError CountsInRange(const HistogramData& histogram, const FitRange& range);
 
+// Raw-data statistics over the same bin selection: the counts plus the
+// data's centroid and rms from bin moments -- the model-free numbers to
+// hold fitted means and widths against.
+struct RegionStats
+{
+    ValueWithError counts;
+    double centroid = 0.0;
+    double rms = 0.0;
+};
+RegionStats AnalyzeRange(const HistogramData& histogram, const FitRange& range);
+
 // A Gaussian peak guessed from the data around x: the mean from the
 // tallest nearby bin, the height from its contents above the local
 // baseline, and sigma from a half-maximum scan. Used by click-to-add and

@@ -6,6 +6,8 @@ add_executable(giggle
     ui/App.cpp
     ui/Fonts.cpp
     ui/ImageExport.cpp
+    ui/PlotExport.cpp
+    ui/PlotRendering.cpp
     ui/Theme.cpp
     ui/panels/FileTreePanel.cpp
     ui/panels/FitModelPanel.cpp

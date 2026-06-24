@@ -8,6 +8,7 @@
 #include "implot.h"
 
 #include "core/Shapes.h"
+#include "ui/PlotRendering.h"
 
 namespace giggle {
 
@@ -153,9 +154,19 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
             ImPlot::SetupAxes(nullptr, "counts");
             ImPlot::SetupAxisScale(ImAxis_Y1, m_logScaleY ? ImPlotScale_Log10 : ImPlotScale_Linear);
 
+            ImPlotRect visible = ImPlot::GetPlotLimits();
+            m_viewLimits[0] = visible.X.Min;
+            m_viewLimits[1] = visible.X.Max;
+            m_viewLimits[2] = visible.Y.Min;
+            m_viewLimits[3] = visible.Y.Max;
+
             if (histogram != nullptr)
             {
                 DrawHistogram(*histogram, theme);
+                if (m_binInspector)
+                {
+                    DrawBinInspector(*histogram, theme, monoFont);
+                }
             }
             if (model != nullptr && histogram != nullptr)
             {
@@ -200,23 +211,46 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
 
 void PlotPanel::DrawHistogram(const HistogramData& histogram, const Theme& theme)
 {
-    // Steps need one y value per edge; the last value is repeated so the
-    // final bin is drawn to its right edge.
-    const std::vector<double>& xs = histogram.binEdges;
-    std::vector<double> ys = histogram.counts;
-    ys.push_back(ys.empty() ? 0.0 : ys.back());
+    RenderHistogramStairs(histogram, theme);
+}
 
-    int pointCount = static_cast<int>(xs.size());
+// Hovering highlights the bin under the cursor and reads out its contents:
+// the spectroscopist's "what exactly is in this channel".
+void PlotPanel::DrawBinInspector(const HistogramData& histogram, const Theme& theme,
+                                 ImFont* monoFont)
+{
+    if (!ImPlot::IsPlotHovered())
+    {
+        return;
+    }
+    ImPlotPoint mouse = ImPlot::GetPlotMousePos();
 
-    ImPlotSpec fillSpec;
-    fillSpec.FillColor = theme.histogramFill;
-    fillSpec.Flags = ImPlotStairsFlags_Shaded;
-    ImPlot::PlotStairs("##data_fill", xs.data(), ys.data(), pointCount, fillSpec);
+    const std::vector<double>& edges = histogram.binEdges;
+    auto above = std::upper_bound(edges.begin(), edges.end(), mouse.x);
+    if (above == edges.begin() || above == edges.end())
+    {
+        return;
+    }
+    int bin = static_cast<int>(above - edges.begin()) - 1;
+    double low = edges[bin];
+    double high = edges[bin + 1];
+    double counts = histogram.counts[bin];
 
-    ImPlotSpec lineSpec;
-    lineSpec.LineColor = theme.histogramLine;
-    lineSpec.LineWeight = 1.2f;
-    ImPlot::PlotStairs("##data_line", xs.data(), ys.data(), pointCount, lineSpec);
+    ImVec4 fill = theme.accent;
+    fill.w = 0.18f;
+    ImVec4 outline = theme.accent;
+    outline.w = 0.55f;
+    ImPlot::PushPlotClipRect();
+    ImVec2 top = ImPlot::PlotToPixels(low, counts);
+    ImVec2 bottom = ImPlot::PlotToPixels(high, 0.0);
+    ImPlot::GetPlotDrawList()->AddRectFilled(top, bottom, ImGui::ColorConvertFloat4ToU32(fill));
+    ImPlot::GetPlotDrawList()->AddRect(top, bottom, ImGui::ColorConvertFloat4ToU32(outline));
+    ImPlot::PopPlotClipRect();
+
+    ImGui::PushFont(monoFont, 13.0f);
+    ImGui::SetTooltip("bin    %d\nrange  [%g, %g)\ncounts %g  +- %g",
+                      bin + 1, low, high, counts, histogram.BinError(bin));
+    ImGui::PopFont();
 }
 
 void PlotPanel::DrawRangeTools(FitModel& model, const HistogramData& histogram, const Theme& theme)
@@ -226,16 +260,7 @@ void PlotPanel::DrawRangeTools(FitModel& model, const HistogramData& histogram, 
         return;
     }
 
-    // A soft shade over the fit region.
-    ImPlotRect limits = ImPlot::GetPlotLimits();
-    ImVec2 topLeft = ImPlot::PlotToPixels(model.range.min, limits.Y.Max);
-    ImVec2 bottomRight = ImPlot::PlotToPixels(model.range.max, limits.Y.Min);
-    ImVec4 shade = theme.accent;
-    shade.w = 0.05f;
-    ImPlot::PushPlotClipRect();
-    ImPlot::GetPlotDrawList()->AddRectFilled(topLeft, bottomRight,
-                                             ImGui::ColorConvertFloat4ToU32(shade));
-    ImPlot::PopPlotClipRect();
+    RenderRangeShade(model.range, theme);
 
     // Draggable edges, snapping to bin edges like every other range edit.
     ImVec4 edgeColor = theme.accent;
@@ -256,54 +281,7 @@ void PlotPanel::DrawRangeTools(FitModel& model, const HistogramData& histogram, 
 void PlotPanel::DrawModelCurves(const FitModel& model, const HistogramData& histogram,
                                 const Theme& theme)
 {
-    if (model.peaks.empty() && model.background.empty())
-    {
-        return;
-    }
-    if (model.range.max <= model.range.min)
-    {
-        return;
-    }
-
-    // The histogram converts the model's densities into counts per bin, so
-    // the curves overlay the data in the same units.
-    FitCurves curves = SampleModelCurves(model, 400, &histogram);
-    if (curves.x.empty())
-    {
-        return;
-    }
-
-    int pointCount = static_cast<int>(curves.x.size());
-
-    // Individual components, dimmed so the data stays dominant. Curve order
-    // is peaks first, then background, matching the model.
-    std::vector<const FitComponent*> components;
-    for (const FitComponent& peak : model.peaks)
-    {
-        components.push_back(&peak);
-    }
-    for (const FitComponent& background : model.background)
-    {
-        components.push_back(&background);
-    }
-
-    for (size_t i = 0; i < components.size() && i < curves.components.size(); ++i)
-    {
-        ImVec4 color = theme.ComponentColor(i);
-        color.w = 0.75f;
-
-        ImPlotSpec spec;
-        spec.LineColor = color;
-        spec.LineWeight = 1.5f;
-        ImPlot::PlotLine(components[i]->label.c_str(), curves.x.data(),
-                         curves.components[i].data(), pointCount, spec);
-    }
-
-    // The total on top, in the accent color.
-    ImPlotSpec totalSpec;
-    totalSpec.LineColor = theme.fitCurve;
-    totalSpec.LineWeight = 2.2f;
-    ImPlot::PlotLine("Model", curves.x.data(), curves.total.data(), pointCount, totalSpec);
+    RenderModelCurves(model, histogram, theme);
 }
 
 void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram, const Theme& theme)
@@ -508,6 +486,7 @@ void PlotPanel::DrawContextMenu(FitModel& model, const HistogramData& histogram,
     }
     ImGui::Separator();
     ImGui::MenuItem("Add peaks on click", nullptr, &m_addPeakMode);
+    ImGui::MenuItem("Bin inspector", nullptr, &m_binInspector);
     ImGui::MenuItem("Log scale Y", nullptr, &m_logScaleY);
     if (ImGui::MenuItem("Autoscale axes"))
     {
