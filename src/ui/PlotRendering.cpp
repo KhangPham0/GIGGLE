@@ -47,6 +47,21 @@ void RenderRangeShade(const FitRange& range, const Theme& theme)
     ImPlot::PopPlotClipRect();
 }
 
+void RenderRangeLines(const FitRange& range, const Theme& theme, float emphasis)
+{
+    if (range.max <= range.min)
+    {
+        return;
+    }
+    double edges[2] = { range.min, range.max };
+    ImVec4 color = theme.accent;
+    color.w = 0.6f;
+    ImPlotSpec spec;
+    spec.LineColor = color;
+    spec.LineWeight = 1.3f * emphasis;
+    ImPlot::PlotInfLines("##fit_range", edges, 2, spec);
+}
+
 void RenderModelCurves(const FitModel& model, const HistogramData& histogram,
                        const Theme& theme, float emphasis)
 {

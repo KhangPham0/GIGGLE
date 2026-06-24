@@ -19,6 +19,10 @@ void RenderHistogramStairs(const HistogramData& histogram, const Theme& theme,
 
 void RenderRangeShade(const FitRange& range, const Theme& theme);
 
+// Two thin vertical lines marking the fit-range edges. Unlike the shade,
+// these read well in an exported figure.
+void RenderRangeLines(const FitRange& range, const Theme& theme, float emphasis = 1.0f);
+
 void RenderModelCurves(const FitModel& model, const HistogramData& histogram,
                        const Theme& theme, float emphasis = 1.0f);
 

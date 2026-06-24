@@ -37,9 +37,10 @@ class PlotPanel
 public:
     static constexpr const char* Title = "Plot";
 
-    // The model is edited in place by the drag handles. The mono font is
-    // used for axis numbers.
-    PlotAction Draw(const HistogramData* histogram, FitModel* model,
+    // The model is edited in place by the drag handles. `showFit` gates the
+    // whole fit overlay (range markers, handles, curves) and is toggled
+    // from the plot's context menu. The mono font is used for axis numbers.
+    PlotAction Draw(const HistogramData* histogram, FitModel* model, bool& showFit,
                     const Theme& theme, ImFont* monoFont);
 
     // Where the plot window was drawn this frame, for the PNG capture.
@@ -52,13 +53,15 @@ public:
 
 private:
     void DrawHistogram(const HistogramData& histogram, const Theme& theme);
+    void DrawFitToolsButton(bool& showFit, const Theme& theme);
     void DrawBinInspector(const HistogramData& histogram, const Theme& theme, ImFont* monoFont);
     void DrawRangeTools(FitModel& model, const HistogramData& histogram, const Theme& theme);
     void DrawModelCurves(const FitModel& model, const HistogramData& histogram, const Theme& theme);
     void DrawPeakHandles(FitModel& model, const HistogramData& histogram, const Theme& theme);
     void DrawBackgroundHandles(FitModel& model, const HistogramData& histogram, const Theme& theme);
     void HandleAddPeakClick(PlotAction& action);
-    void DrawContextMenu(FitModel& model, const HistogramData& histogram, PlotAction& action);
+    void DrawContextMenu(FitModel& model, const HistogramData& histogram, bool& showFit,
+                         PlotAction& action);
 
     bool m_addPeakMode = false;
     bool m_binInspector = false;

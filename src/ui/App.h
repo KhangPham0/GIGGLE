@@ -94,9 +94,15 @@ private:
     // Panel visibility; a hidden panel's dock space is reclaimed by the
     // plot until it returns.
     bool m_showFileTree = true;
-    bool m_showFitModel = true;
+    bool m_showFitModel = false; // hidden until fitting begins (see m_showFit)
     bool m_showResults = true;
     bool m_showAbout = false;
+
+    // The fit-tools toggle: when off, the plot is a clean viewer and the
+    // fit panel is hidden; turning it off/on syncs the panel's visibility,
+    // but the panel can still be reopened independently while it stays off.
+    bool m_showFit = false;
+    bool m_showFitPrev = false;
 
     SourceFactory m_openSource;
     FormulaValidator m_formulaValidator;

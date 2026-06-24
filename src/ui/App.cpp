@@ -6,10 +6,9 @@
 #include <fstream>
 
 #include "core/Serialization.h"
-#include "ui/fonts/IconsFontAwesome5.h"
 #include "core/Shapes.h"
 #include "core/Version.h"
-#include "ui/PlotRendering.h"
+#include "ui/fonts/IconsFontAwesome5.h"
 
 #include "imgui.h"
 #include "imgui_internal.h" // DockBuilder API, used for the default layout
@@ -256,7 +255,7 @@ void App::DrawFrame()
     }
 
     PlotAction plotAction = m_plotPanel.Draw(m_histogram.has_value() ? &m_histogram.value() : nullptr,
-                                             &m_model, m_theme, m_fonts.mono);
+                                             &m_model, m_showFit, m_theme, m_fonts.mono);
     if (plotAction.addPeakAt.has_value())
     {
         AddPeakAt(plotAction.addPeakAt.value());
@@ -272,10 +271,19 @@ void App::DrawFrame()
 
     if (m_showFitModel)
     {
+        // Adding a component from the panel (while it is open with the
+        // tools off) turns the fit tools on, so the work shows on the plot.
+        size_t componentsBefore = m_model.peaks.size() + m_model.background.size();
+
         FitPanelAction fitAction = m_fitModelPanel.Draw(m_model,
                                                         m_histogram.has_value() ? &m_histogram.value() : nullptr,
                                                         FitRunning(), m_preFitModel.has_value(),
                                                         m_theme, m_fonts.mono, m_formulaValidator);
+
+        if (m_model.peaks.size() + m_model.background.size() > componentsBefore)
+        {
+            m_showFit = true;
+        }
         if (fitAction.fitRequested)
         {
             StartFit();
@@ -320,6 +328,16 @@ void App::DrawFrame()
     DrawExportDialog();
     DrawAboutWindow();
     DrawErrorPopup();
+
+    // When the fit tools toggle changes, follow it with the fit panel:
+    // turning the tools off hides the panel, turning them on shows it. The
+    // panel can still be toggled on its own (View menu / Ctrl+J) without
+    // changing the tools, since that does not move m_showFit.
+    if (m_showFit != m_showFitPrev)
+    {
+        m_showFitModel = m_showFit;
+        m_showFitPrev = m_showFit;
+    }
 }
 
 void App::DrawMainMenu()
@@ -356,6 +374,8 @@ void App::DrawMainMenu()
         }
         if (ImGui::BeginMenu("View"))
         {
+            ImGui::MenuItem("Fit tools", nullptr, &m_showFit);
+            ImGui::Separator();
             ImGui::MenuItem(FileTreePanel::Title, GIGGLE_MOD "+B", &m_showFileTree);
             ImGui::MenuItem(FitModelPanel::Title, GIGGLE_MOD "+J", &m_showFitModel);
             ImGui::MenuItem(ResultsPanel::Title, nullptr, &m_showResults);
@@ -453,6 +473,7 @@ void App::AddPeakAt(double x)
     FitComponent peak = SuggestGaussianPeak(m_histogram.value(), m_model.range, x);
     peak.label = NextPeakLabel(m_model.peaks);
     m_model.peaks.push_back(peak);
+    m_showFit = true; // dropping a peak begins fitting
 }
 
 void App::DrawAboutWindow()
@@ -576,6 +597,7 @@ void App::StartFit()
     {
         return;
     }
+    m_showFit = true; // running a fit shows it on the plot
 
     m_preFitModel = m_model;
     m_fitResult.reset();
@@ -827,8 +849,12 @@ void App::PerformPlotExport()
     }
     m_exportOptions.logScaleY = m_plotPanel.LogScaleY();
 
+    // Export mirrors the plot: with the fit tools on, the model curves
+    // (guess or fit) are drawn; with them off, just the data. The range
+    // shade and drag handles are interactive aids and never exported.
+    const FitModel* exportModel = m_showFit ? &m_model : nullptr;
     bool saved = ExportPlotOffscreen(m_pendingExportPath, m_exportOptions,
-                                     m_histogram.value(), &m_model, m_theme, m_fonts.mono);
+                                     m_histogram.value(), exportModel, m_theme, m_fonts.mono);
     if (!saved)
     {
         m_errorMessage = "could not export the plot to " + m_pendingExportPath;

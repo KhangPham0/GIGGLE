@@ -9,6 +9,7 @@
 
 #include "core/Shapes.h"
 #include "ui/PlotRendering.h"
+#include "ui/fonts/IconsFontAwesome5.h"
 
 namespace giggle {
 
@@ -122,7 +123,7 @@ FitParameter* MeanParameter(FitComponent& component)
 
 } // namespace
 
-PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
+PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model, bool& showFit,
                            const Theme& theme, ImFont* monoFont)
 {
     PlotAction action;
@@ -162,7 +163,7 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
         // "###" keeps the plot's ID stable while the visible title changes.
         std::string plotTitle = (histogram != nullptr ? histogram->name : "") + "###spectrum";
 
-        ImGui::PushFont(monoFont, 13.0f);
+        ImGui::PushFont(monoFont, 15.0f);
         if (ImPlot::BeginPlot(plotTitle.c_str(), ImVec2(-1.0f, -1.0f), ImPlotFlags_NoMenus))
         {
             ImPlot::SetupAxes(nullptr, "counts");
@@ -205,10 +206,15 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
             }
             if (model != nullptr && histogram != nullptr)
             {
-                DrawRangeTools(*model, *histogram, theme);
-                DrawModelCurves(*model, *histogram, theme);
-                DrawPeakHandles(*model, *histogram, theme);
-                DrawBackgroundHandles(*model, *histogram, theme);
+                // The fit overlay only shows when the tools are on; clicking
+                // to add a peak still works and turns them on (in the App).
+                if (showFit)
+                {
+                    DrawRangeTools(*model, *histogram, theme);
+                    DrawModelCurves(*model, *histogram, theme);
+                    DrawPeakHandles(*model, *histogram, theme);
+                    DrawBackgroundHandles(*model, *histogram, theme);
+                }
                 HandleAddPeakClick(action);
 
                 // A right click (not a right drag, which is box zoom)
@@ -224,6 +230,13 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
                 }
             }
 
+            // A floating, always-visible toggle in the plot's top-left
+            // corner, so the fit tools are discoverable without the menus.
+            if (histogram != nullptr)
+            {
+                DrawFitToolsButton(showFit, theme);
+            }
+
             ImPlot::EndPlot();
         }
         ImGui::PopFont();
@@ -235,7 +248,7 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
                 ImGui::OpenPopup("##plot_context");
                 m_openContextMenu = false;
             }
-            DrawContextMenu(*model, *histogram, action);
+            DrawContextMenu(*model, *histogram, showFit, action);
         }
     }
     ImGui::End();
@@ -247,6 +260,39 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model,
 void PlotPanel::DrawHistogram(const HistogramData& histogram, const Theme& theme)
 {
     RenderHistogramStairs(histogram, theme);
+}
+
+// The fit-tools toggle, floated over the plot's top-left corner. Accent
+// colored while on. Drawn inside the plot so it never shrinks it.
+void PlotPanel::DrawFitToolsButton(bool& showFit, const Theme& theme)
+{
+    ImVec2 corner = ImPlot::GetPlotPos();
+    ImGui::SetCursorScreenPos(ImVec2(corner.x + 10.0f, corner.y + 10.0f));
+
+    // Capture the state before the button: it toggles showFit, so the pop
+    // count must be decided from the value at push time, not after.
+    bool active = showFit;
+    if (active)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, theme.accent);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, theme.accentHover);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, theme.accentActive);
+        ImGui::PushStyleColor(ImGuiCol_Text, theme.windowBackground);
+    }
+    if (ImGui::Button(ICON_FA_CHART_LINE "  Fit tools"))
+    {
+        showFit = !showFit;
+    }
+    if (active)
+    {
+        ImGui::PopStyleColor(4);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(active
+                              ? "Fit tools on. Click for a clean view (and clean exports)."
+                              : "Click to start fitting: add peaks, set the range, run the fit.");
+    }
 }
 
 // Hovering highlights the bin under the cursor and reads out its contents:
@@ -490,12 +536,16 @@ void PlotPanel::HandleAddPeakClick(PlotAction& action)
     }
 }
 
-void PlotPanel::DrawContextMenu(FitModel& model, const HistogramData& histogram, PlotAction& action)
+void PlotPanel::DrawContextMenu(FitModel& model, const HistogramData& histogram, bool& showFit,
+                                PlotAction& action)
 {
     if (!ImGui::BeginPopup("##plot_context"))
     {
         return;
     }
+
+    ImGui::MenuItem("Fit tools", nullptr, &showFit);
+    ImGui::Separator();
 
     if (ImGui::MenuItem("Add peak here"))
     {
@@ -509,6 +559,7 @@ void PlotPanel::DrawContextMenu(FitModel& model, const HistogramData& histogram,
             model.range.max = histogram.XMax();
         }
         model.range = SnapRangeToBinEdges(histogram, model.range);
+        showFit = true;
     }
     if (ImGui::MenuItem("Set range end here"))
     {
@@ -518,6 +569,7 @@ void PlotPanel::DrawContextMenu(FitModel& model, const HistogramData& histogram,
             model.range.min = histogram.XMin();
         }
         model.range = SnapRangeToBinEdges(histogram, model.range);
+        showFit = true;
     }
     ImGui::Separator();
     ImGui::MenuItem("Add peaks on click", nullptr, &m_addPeakMode);

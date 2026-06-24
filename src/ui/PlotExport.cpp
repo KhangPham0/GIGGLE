@@ -52,7 +52,7 @@ bool ExportPlotOffscreen(const std::string& path, const PlotExportOptions& optio
                      | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoDocking);
 
     std::string plotTitle = histogram.name + "###export";
-    ImGui::PushFont(monoFont, 13.0f);
+    ImGui::PushFont(monoFont, 15.0f);
     if (ImPlot::BeginPlot(plotTitle.c_str(), ImVec2(-1.0f, -1.0f),
                           ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect))
     {
@@ -64,11 +64,14 @@ bool ExportPlotOffscreen(const std::string& path, const PlotExportOptions& optio
         ImPlot::SetupAxisLimits(ImAxis_Y1, options.viewLimits[2], options.viewLimits[3],
                                 ImGuiCond_Always);
 
+        // A figure shows the data, the fit curves, and thin lines marking
+        // the fit range. The heavy range shade and the drag handles are
+        // interactive aids, so they are deliberately left out here.
         RenderHistogramStairs(histogram, theme, emphasis);
         if (model != nullptr)
         {
-            RenderRangeShade(model->range, theme);
             RenderModelCurves(*model, histogram, theme, emphasis);
+            RenderRangeLines(model->range, theme, emphasis);
         }
 
         ImPlot::EndPlot();
