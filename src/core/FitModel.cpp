@@ -92,6 +92,39 @@ std::optional<FitStatistic> FitStatisticFromName(const std::string& name)
     return std::nullopt;
 }
 
+const char* MinimizerAlgorithmName(MinimizerAlgorithm algorithm)
+{
+    switch (algorithm)
+    {
+        case MinimizerAlgorithm::Migrad:      return "migrad";
+        case MinimizerAlgorithm::Simplex:     return "simplex";
+        case MinimizerAlgorithm::Scan:        return "scan";
+        case MinimizerAlgorithm::Combination: return "combination";
+    }
+    return "unknown";
+}
+
+std::optional<MinimizerAlgorithm> MinimizerAlgorithmFromName(const std::string& name)
+{
+    if (name == "migrad")
+    {
+        return MinimizerAlgorithm::Migrad;
+    }
+    if (name == "simplex")
+    {
+        return MinimizerAlgorithm::Simplex;
+    }
+    if (name == "scan")
+    {
+        return MinimizerAlgorithm::Scan;
+    }
+    if (name == "combination")
+    {
+        return MinimizerAlgorithm::Combination;
+    }
+    return std::nullopt;
+}
+
 std::string NextPeakLabel(const std::vector<FitComponent>& peaks)
 {
     int highest = 0;

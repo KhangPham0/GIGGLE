@@ -61,6 +61,14 @@ static FitModel MakeRichModel()
     };
     model.background.push_back(custom);
 
+    // Non-default fit settings, so the round-trip exercises every field.
+    model.algorithm = MinimizerAlgorithm::Simplex;
+    model.integrateBins = true;
+    model.ignoreBinErrors = true;
+    model.countEmptyBins = true;
+    model.tolerance = 0.005;
+    model.maxIterations = 500;
+
     return model;
 }
 
@@ -350,6 +358,29 @@ TEST_CASE("FitModel survives a JSON round-trip unchanged")
     CHECK(!restored.peaks[1].parameters[0].lowerBound.has_value());
     CHECK(restored.background[1].shape == ShapeKind::Custom);
     CHECK(restored.background[1].formula == "1.0/(1.0+exp((x-[0])/[1]))");
+
+    CHECK(restored.algorithm == MinimizerAlgorithm::Simplex);
+    CHECK(restored.integrateBins);
+    CHECK(restored.ignoreBinErrors);
+    CHECK(restored.countEmptyBins);
+    CHECK(restored.tolerance == doctest::Approx(0.005));
+    CHECK(restored.maxIterations == 500);
+}
+
+TEST_CASE("a preset without a settings block loads with default fit settings")
+{
+    // Presets written before fit settings existed must still load, falling
+    // back to the defaults rather than throwing.
+    Json json = ToJson(MakeRichModel());
+    json.erase("settings");
+
+    FitModel model = FitModelFromJson(json);
+    CHECK(model.algorithm == MinimizerAlgorithm::Migrad);
+    CHECK(!model.integrateBins);
+    CHECK(!model.ignoreBinErrors);
+    CHECK(!model.countEmptyBins);
+    CHECK(model.tolerance == 0.0);
+    CHECK(model.maxIterations == 0);
 }
 
 TEST_CASE("FitModelFromJson rejects malformed documents")

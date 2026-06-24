@@ -169,6 +169,17 @@ Json ToJson(const FitModel& model)
     json["fit_range"] = { { "min", model.range.min }, { "max", model.range.max } };
     json["statistic"] = FitStatisticName(model.statistic);
 
+    // How the fit is run. printLevel is a session preference (it changes no
+    // result), so it deliberately stays out of the saved recipe.
+    json["settings"] = {
+        { "algorithm", MinimizerAlgorithmName(model.algorithm) },
+        { "integrate_bins", model.integrateBins },
+        { "ignore_bin_errors", model.ignoreBinErrors },
+        { "count_empty_bins", model.countEmptyBins },
+        { "tolerance", model.tolerance },
+        { "max_iterations", model.maxIterations },
+    };
+
     json["peaks"] = Json::array();
     for (const FitComponent& peak : model.peaks)
     {
@@ -198,6 +209,42 @@ FitModel FitModelFromJson(const Json& json)
         throw std::runtime_error("unknown statistic \"" + statisticName + "\"");
     }
     model.statistic = statistic.value();
+
+    // Optional and additive: presets written before these settings existed
+    // simply keep the defaults.
+    if (json.contains("settings"))
+    {
+        const Json& settings = json.at("settings");
+        if (settings.contains("algorithm"))
+        {
+            std::optional<MinimizerAlgorithm> algorithm =
+                MinimizerAlgorithmFromName(settings.at("algorithm").get<std::string>());
+            if (algorithm.has_value())
+            {
+                model.algorithm = algorithm.value();
+            }
+        }
+        if (settings.contains("integrate_bins"))
+        {
+            model.integrateBins = settings.at("integrate_bins").get<bool>();
+        }
+        if (settings.contains("ignore_bin_errors"))
+        {
+            model.ignoreBinErrors = settings.at("ignore_bin_errors").get<bool>();
+        }
+        if (settings.contains("count_empty_bins"))
+        {
+            model.countEmptyBins = settings.at("count_empty_bins").get<bool>();
+        }
+        if (settings.contains("tolerance"))
+        {
+            model.tolerance = settings.at("tolerance").get<double>();
+        }
+        if (settings.contains("max_iterations"))
+        {
+            model.maxIterations = settings.at("max_iterations").get<int>();
+        }
+    }
 
     for (const Json& peakJson : json.at("peaks"))
     {

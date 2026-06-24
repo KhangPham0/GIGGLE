@@ -388,6 +388,120 @@ TEST_CASE("a tailed peak fits end to end with calibrated counts")
     CHECK(result.normSumCheck.agreed);
 }
 
+TEST_CASE("the integral bin option removes the midpoint bias on an under-sampled peak")
+{
+    // A peak about half a bin wide: the midpoint rule misjudges the steep
+    // central bins, the true bin integral does not. The data is noise-free
+    // (the exact bin integrals), so any difference is the bin model, not
+    // statistics. This also confirms ROOT's fIntegral normalization matches
+    // our density * bin-width function.
+    const double mean = 50.0;
+    const double sigma = 1.0;
+    const double ampTruth = 100.0; // counts per x-unit at the peak
+    const double bgDensity = 5.0;
+
+    FitComponent truthPeak;
+    truthPeak.shape = ShapeKind::Gaussian;
+    truthPeak.amplitude = { "amplitude", ampTruth, false, std::nullopt, std::nullopt };
+    truthPeak.parameters = {
+        { "mean", mean, false, std::nullopt, std::nullopt },
+        { "sigma", sigma, false, std::nullopt, std::nullopt },
+    };
+    FitRange range{ 40.0, 60.0 };
+    double truthCounts = ComponentCounts(truthPeak, range);
+
+    HistogramData data;
+    data.name = "coarse";
+    const int binCount = 20; // bin width 2.0 over [30, 70]
+    for (int i = 0; i <= binCount; ++i)
+    {
+        data.binEdges.push_back(30.0 + 40.0 * i / binCount);
+    }
+    for (int i = 0; i < binCount; ++i)
+    {
+        double a = data.binEdges[i];
+        double b = data.binEdges[i + 1];
+        data.counts.push_back(ampTruth * ShapeIntegral(truthPeak, range, a, b)
+                              + bgDensity * (b - a));
+    }
+
+    FitModel model;
+    model.range = range;
+    model.statistic = FitStatistic::ChiSquare;
+    FitComponent peak;
+    peak.label = "Peak 1";
+    peak.shape = ShapeKind::Gaussian;
+    peak.amplitude = { "amplitude", 80.0, false, 0.0, std::nullopt };
+    peak.parameters = {
+        { "mean", mean, true, std::nullopt, std::nullopt },  // fixed to truth
+        { "sigma", sigma, true, std::nullopt, std::nullopt }, // fixed to truth
+    };
+    model.peaks.push_back(peak);
+    FitComponent background;
+    background.label = "Background";
+    background.shape = ShapeKind::Constant;
+    background.amplitude = { "amplitude", 4.0, false, 0.0, std::nullopt };
+    model.background.push_back(background);
+
+    RootFitEngine engine;
+
+    FitModel midpoint = model;
+    midpoint.integrateBins = false;
+    FitResult midpointResult = engine.Fit(data, midpoint);
+
+    FitModel integral = model;
+    integral.integrateBins = true;
+    FitResult integralResult = engine.Fit(data, integral);
+
+    REQUIRE(midpointResult.converged);
+    REQUIRE(integralResult.converged);
+
+    double integralErr = std::abs(integralResult.peaks[0].counts.value - truthCounts) / truthCounts;
+    double midpointErr = std::abs(midpointResult.peaks[0].counts.value - truthCounts) / truthCounts;
+
+    // The integral recovers the truth; the midpoint is visibly biased; and
+    // the two disagree -- so the option does something real.
+    CHECK(integralErr < 0.02);
+    CHECK(midpointErr > integralErr);
+    CHECK(std::abs(midpointResult.peaks[0].counts.value - integralResult.peaks[0].counts.value)
+          > 0.01 * truthCounts);
+}
+
+TEST_CASE("alternative minimizer algorithms reach the same minimum")
+{
+    RootFitEngine engine;
+    HistogramData data = GenerateToy(5);
+    double truth = TruePeakYield();
+
+    for (MinimizerAlgorithm algorithm : { MinimizerAlgorithm::Simplex,
+                                          MinimizerAlgorithm::Combination })
+    {
+        FitModel model = MakeToyModel();
+        model.algorithm = algorithm;
+        FitResult result = engine.Fit(data, model);
+        REQUIRE(result.converged);
+        CHECK(std::abs(result.peaks[0].counts.value - truth)
+              < 5.0 * result.peaks[0].counts.error);
+        CHECK(result.normSumCheck.agreed);
+    }
+}
+
+TEST_CASE("ignoring bin errors still produces a sensible fit")
+{
+    RootFitEngine engine;
+    HistogramData data = GenerateToy(15);
+
+    FitModel model = MakeToyModel();
+    model.statistic = FitStatistic::ChiSquare;
+    model.ignoreBinErrors = true;
+    FitResult result = engine.Fit(data, model);
+
+    REQUIRE(result.converged);
+    CHECK(result.peaks[0].counts.value > 0.0);
+    CHECK(std::abs(result.peaks[0].counts.value - TruePeakYield())
+          < 6.0 * result.peaks[0].counts.error);
+}
+
 TEST_CASE("bad custom formulas and empty models fail gracefully")
 {
     RootFitEngine engine;

@@ -60,6 +60,25 @@ enum class FitStatistic
     PoissonLikelihood,
 };
 
+// The Minuit2 minimization algorithm. MIGRAD is the standard; the others
+// are slower fallbacks for fits that will not converge.
+enum class MinimizerAlgorithm
+{
+    Migrad,
+    Simplex,
+    Scan,
+    Combination,
+};
+
+// How much Minuit2 prints to the terminal during the fit. It does not
+// affect the result, so it is a session preference and is not serialized.
+enum class PrintLevel
+{
+    Quiet,
+    Normal,
+    Verbose,
+};
+
 struct FitRange
 {
     double min = 0.0;
@@ -75,6 +94,18 @@ struct FitModel
     // fit reproduces the data total by construction). Likelihood is the
     // better choice for low-count spectra.
     FitStatistic statistic = FitStatistic::ChiSquare;
+
+    // How the fit is run. All of these shape the result and travel with a
+    // preset, except printLevel, which is session-only terminal verbosity.
+    MinimizerAlgorithm algorithm = MinimizerAlgorithm::Migrad;
+    bool integrateBins = false;   // compare a bin to the function's integral,
+                                  // not its value at the bin center
+    bool ignoreBinErrors = false; // treat every bin as weight 1 (unweighted)
+    bool countEmptyBins = false;  // include zero-count bins (always on for likelihood)
+    double tolerance = 0.0;       // 0 = Minuit2 default
+    int maxIterations = 0;        // 0 = Minuit2 default
+    PrintLevel printLevel = PrintLevel::Quiet;
+
     std::vector<FitComponent> peaks;
     std::vector<FitComponent> background;
 };
@@ -89,6 +120,9 @@ std::vector<std::string> ShapeParameterNames(ShapeKind kind);
 
 const char* FitStatisticName(FitStatistic statistic);
 std::optional<FitStatistic> FitStatisticFromName(const std::string& name);
+
+const char* MinimizerAlgorithmName(MinimizerAlgorithm algorithm);
+std::optional<MinimizerAlgorithm> MinimizerAlgorithmFromName(const std::string& name);
 
 // "Peak <n>" with n above every number already used by the given peaks.
 std::string NextPeakLabel(const std::vector<FitComponent>& peaks);

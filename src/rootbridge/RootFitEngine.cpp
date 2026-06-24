@@ -137,6 +137,61 @@ bool HasUniformBins(const HistogramData& data)
     return true;
 }
 
+// The model's algorithm as Minuit2's algorithm string.
+const char* RootAlgorithm(MinimizerAlgorithm algorithm)
+{
+    switch (algorithm)
+    {
+        case MinimizerAlgorithm::Migrad:      return "Migrad";
+        case MinimizerAlgorithm::Simplex:     return "Simplex";
+        case MinimizerAlgorithm::Scan:        return "Scan";
+        case MinimizerAlgorithm::Combination: return "Combined";
+    }
+    return "Migrad";
+}
+
+// Minuit2 print levels: 0 silent, higher is chattier (to the terminal).
+int RootPrintLevel(PrintLevel level)
+{
+    switch (level)
+    {
+        case PrintLevel::Quiet:   return 0;
+        case PrintLevel::Normal:  return 1;
+        case PrintLevel::Verbose: return 3;
+    }
+    return 0;
+}
+
+// Minimizer choices applied to both the main fit and the verification fit,
+// so the two minimize the same way. The data-side options (integral,
+// weights, empty bins) live on the shared BinData instead.
+void ApplyMinimizerConfig(ROOT::Fit::Fitter& fitter, const FitModel& model)
+{
+    fitter.Config().SetMinimizer("Minuit2", RootAlgorithm(model.algorithm));
+    ROOT::Math::MinimizerOptions& options = fitter.Config().MinimizerOptions();
+    if (model.tolerance > 0.0)
+    {
+        options.SetTolerance(model.tolerance);
+    }
+    if (model.maxIterations > 0)
+    {
+        options.SetMaxIterations(static_cast<unsigned int>(model.maxIterations));
+        options.SetMaxFunctionCalls(static_cast<unsigned int>(model.maxIterations));
+    }
+    options.SetPrintLevel(RootPrintLevel(model.printLevel));
+}
+
+// The data options shared by both fits: how each bin is compared to the
+// model. Set once on the BinData the verification fit also uses.
+ROOT::Fit::DataOptions MakeDataOptions(const FitModel& model, bool poisson)
+{
+    ROOT::Fit::DataOptions options;
+    options.fIntegral = model.integrateBins;        // integral over the bin vs center value
+    options.fErrors1 = model.ignoreBinErrors;       // every bin weight 1
+    options.fUseEmpty = poisson || model.countEmptyBins; // likelihood always needs empties
+    return options;
+}
+
 // Re-fits the same data through ROOT's TF1NormSum, whose coefficients are
 // the components' in-range integrals, and compares against our counts.
 // An independent path to the same numbers: if the two disagree, something
@@ -217,7 +272,7 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
     // parameters in sequence.
     ROOT::Math::WrappedMultiTF1 wrapped(combined, 1);
     ROOT::Fit::Fitter fitter;
-    fitter.Config().SetMinimizer("Minuit2", "Migrad");
+    ApplyMinimizerConfig(fitter, model);
     fitter.SetFunction(wrapped, false);
 
     // Mirror the model's constraints on the shape parameters, so a fit
@@ -238,6 +293,10 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
     }
 
     bool succeeded = poisson ? fitter.LikelihoodFit(binData, true) : fitter.Fit(binData);
+    if (succeeded && fitter.Result().CovMatrixStatus() < 2)
+    {
+        fitter.CalculateHessErrors();
+    }
     const ROOT::Fit::FitResult& fit = fitter.Result();
     if (!succeeded || !fit.IsValid())
     {
@@ -492,15 +551,14 @@ FitResult RootFitEngine::Fit(const HistogramData& histogram, const FitModel& mod
 
         // The data points inside the fit range. The Poisson likelihood must
         // see empty bins too; the chi-square skips them (no defined error).
-        ROOT::Fit::DataOptions dataOptions;
-        dataOptions.fUseEmpty = poisson;
+        ROOT::Fit::DataOptions dataOptions = MakeDataOptions(model, poisson);
         ROOT::Fit::DataRange dataRange(range.min, range.max);
         ROOT::Fit::BinData binData(dataOptions, dataRange);
         ROOT::Fit::FillData(binData, &data);
 
         ROOT::Math::WrappedMultiTF1 wrappedFunction(function, 1);
         ROOT::Fit::Fitter fitter;
-        fitter.Config().SetMinimizer("Minuit2", "Migrad");
+        ApplyMinimizerConfig(fitter, model);
         fitter.SetFunction(wrappedFunction, false);
 
         for (const ComponentSlot& slot : slots)
@@ -515,6 +573,12 @@ FitResult RootFitEngine::Fit(const HistogramData& histogram, const FitModel& mod
         }
 
         bool succeeded = poisson ? fitter.LikelihoodFit(binData, true) : fitter.Fit(binData);
+        // SIMPLEX and SCAN locate the minimum but leave no covariance; HESSE
+        // fills it in so every algorithm still yields uncertainties.
+        if (succeeded && fitter.Result().CovMatrixStatus() < 2)
+        {
+            fitter.CalculateHessErrors();
+        }
         const ROOT::Fit::FitResult& fit = fitter.Result();
 
         result.converged = succeeded && fit.IsValid();
