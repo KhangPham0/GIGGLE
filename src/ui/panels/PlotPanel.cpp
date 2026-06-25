@@ -398,7 +398,7 @@ void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram,
         // Two half-maximum handles: drag horizontally to set the width.
         // The tailed gaussian is asymmetric, so its sides are located
         // numerically and a drag scales sigma proportionally.
-        bool asymmetric = peak.shape == ShapeKind::GaussianTail;
+        bool asymmetric = peak.shape == ShapeKind::GaussianTail || peak.shape == ShapeKind::Landau;
         double leftWidth = asymmetric ? NumericHalfWidth(peak, model.range, mean->value, -1.0)
                                       : HalfWidthAtHalfMax(peak);
         double rightWidth = asymmetric ? NumericHalfWidth(peak, model.range, mean->value, +1.0)

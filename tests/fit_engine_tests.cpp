@@ -4,6 +4,10 @@
 #include <cmath>
 #include <random>
 
+#include "TF1.h"
+#include "TMath.h"
+#include "Math/PdfFuncMathCore.h"
+
 #include "core/Shapes.h"
 #include "rootbridge/FormulaSupport.h"
 #include "rootbridge/RootFitEngine.h"
@@ -605,6 +609,224 @@ TEST_CASE("a crystal ball peak fits end to end with calibrated counts")
           < 5.0 * result.peaks[0].counts.error);
     CHECK(result.normSumCheck.performed);
     CHECK(result.normSumCheck.agreed);
+}
+
+TEST_CASE("a landau peak fits end to end with calibrated counts")
+{
+    FitComponent truth;
+    truth.shape = ShapeKind::Landau;
+    truth.amplitude = { "amplitude", 70.0, false, std::nullopt, std::nullopt };
+    truth.parameters = {
+        { "mean", 50.0, false, std::nullopt, std::nullopt },
+        { "scale", 2.5, false, std::nullopt, std::nullopt },
+    };
+    FitRange fitRange{ kFitLo, kFitHi };
+    double truthCounts = ComponentCounts(truth, fitRange);
+
+    HistogramData data;
+    data.name = "landau_toy";
+    const int binCount = 200;
+    for (int i = 0; i <= binCount; ++i)
+    {
+        data.binEdges.push_back(100.0 * i / binCount);
+    }
+    std::mt19937 rng(43);
+    for (int i = 0; i < binCount; ++i)
+    {
+        double expected = truth.amplitude.value
+                              * ShapeIntegral(truth, fitRange, data.binEdges[i], data.binEdges[i + 1])
+                          + 15.0 * (data.binEdges[i + 1] - data.binEdges[i]);
+        std::poisson_distribution<int> poisson(expected);
+        data.counts.push_back(poisson(rng));
+    }
+
+    FitModel model;
+    model.range = fitRange;
+    model.statistic = FitStatistic::PoissonLikelihood;
+
+    FitComponent peak = truth;
+    peak.label = "Peak 1";
+    peak.amplitude = { "amplitude", 55.0, false, 0.0, std::nullopt };
+    peak.parameters[0].value = 49.0;                                   // mean
+    peak.parameters[1] = { "scale", 3.0, false, 0.0, std::nullopt };   // scale
+    model.peaks.push_back(peak);
+
+    FitComponent background;
+    background.label = "Background";
+    background.shape = ShapeKind::Constant;
+    background.amplitude = { "amplitude", 12.0, false, 0.0, std::nullopt };
+    model.background.push_back(background);
+
+    RootFitEngine engine;
+    FitResult result = engine.Fit(data, model);
+
+    REQUIRE(result.converged);
+    CHECK(std::abs(result.peaks[0].counts.value - truthCounts)
+          < 5.0 * result.peaks[0].counts.error);
+    CHECK(result.normSumCheck.performed);
+    CHECK(result.normSumCheck.agreed);
+}
+
+TEST_CASE("GIGGLE's shapes match ROOT's own native functions")
+{
+    // The per-fit TF1NormSum cross-check uses GIGGLE's shape math on both
+    // sides, so it cannot catch a discrepancy between our functions and
+    // ROOT's native ones. These checks compare directly: identical functions
+    // mean identical fits (same Minuit2, same data).
+    FitRange range{ 0.0, 100.0 };
+
+    SUBCASE("gaussian == TMath::Gaus")
+    {
+        FitComponent g;
+        g.shape = ShapeKind::Gaussian;
+        g.amplitude = { "amplitude", 1.0, false, std::nullopt, std::nullopt };
+        g.parameters = { { "mean", 50.0, false, std::nullopt, std::nullopt },
+                         { "sigma", 4.0, false, std::nullopt, std::nullopt } };
+        for (double x = 25.0; x <= 75.0; x += 1.0)
+        {
+            CHECK(ShapeValue(g, range, x)
+                  == doctest::Approx(TMath::Gaus(x, 50.0, 4.0, kFALSE)).epsilon(1e-9));
+        }
+    }
+
+    SUBCASE("crystal ball == ROOT::Math::crystalball_function")
+    {
+        double mean = 50.0, sigma = 4.0, alpha = 1.3, n = 2.5;
+        FitComponent cb;
+        cb.shape = ShapeKind::CrystalBall;
+        cb.amplitude = { "amplitude", 1.0, false, std::nullopt, std::nullopt };
+        cb.parameters = { { "mean", mean, false, std::nullopt, std::nullopt },
+                          { "sigma", sigma, false, std::nullopt, std::nullopt },
+                          { "alpha", alpha, false, std::nullopt, std::nullopt },
+                          { "n", n, false, std::nullopt, std::nullopt } };
+        for (double x = 20.0; x <= 80.0; x += 1.0)
+        {
+            CHECK(ShapeValue(cb, range, x)
+                  == doctest::Approx(ROOT::Math::crystalball_function(x, alpha, n, sigma, mean))
+                         .epsilon(1e-9));
+        }
+    }
+
+    SUBCASE("landau == TMath::Landau (our ported CERNLIB recipe)")
+    {
+        double mean = 50.0, scale = 3.0;
+        FitComponent l;
+        l.shape = ShapeKind::Landau;
+        l.amplitude = { "amplitude", 1.0, false, std::nullopt, std::nullopt };
+        l.parameters = { { "mean", mean, false, std::nullopt, std::nullopt },
+                         { "scale", scale, false, std::nullopt, std::nullopt } };
+        // Our shape places the standardized density's peak at the mean and
+        // normalizes to 1 there; reproduce that from ROOT's TMath::Landau.
+        const double off = 0.22278298;
+        double rootPeak = TMath::Landau(-off, 0.0, 1.0, kFALSE);
+        for (double x = 20.0; x <= 110.0; x += 1.0)
+        {
+            double rootProfile =
+                TMath::Landau((x - mean) / scale - off, 0.0, 1.0, kFALSE) / rootPeak;
+            CHECK(ShapeValue(l, range, x) == doctest::Approx(rootProfile).epsilon(1e-6));
+        }
+    }
+
+    SUBCASE("lorentzian == TMath::BreitWigner")
+    {
+        // Our gamma is the HWHM; ROOT's BreitWigner gamma is the FWHM (2x).
+        double mean = 50.0, gamma = 4.0;
+        FitComponent lz;
+        lz.shape = ShapeKind::Lorentzian;
+        lz.amplitude = { "amplitude", 1.0, false, std::nullopt, std::nullopt };
+        lz.parameters = { { "mean", mean, false, std::nullopt, std::nullopt },
+                          { "gamma", gamma, false, std::nullopt, std::nullopt } };
+        double bwPeak = TMath::BreitWigner(mean, mean, 2.0 * gamma);
+        for (double x = 25.0; x <= 75.0; x += 1.0)
+        {
+            CHECK(ShapeValue(lz, range, x)
+                  == doctest::Approx(TMath::BreitWigner(x, mean, 2.0 * gamma) / bwPeak).epsilon(1e-9));
+        }
+    }
+
+    SUBCASE("voigt == TMath::Voigt")
+    {
+        // Our gamma is the Lorentzian HWHM; ROOT's lg is the FWHM (2x). Both
+        // are approximations of the true Voigt, so they agree to ~1e-3.
+        double mean = 50.0, sigma = 3.0, gamma = 2.0;
+        FitComponent v;
+        v.shape = ShapeKind::Voigt;
+        v.amplitude = { "amplitude", 1.0, false, std::nullopt, std::nullopt };
+        v.parameters = { { "mean", mean, false, std::nullopt, std::nullopt },
+                         { "sigma", sigma, false, std::nullopt, std::nullopt },
+                         { "gamma", gamma, false, std::nullopt, std::nullopt } };
+        double vPeak = TMath::Voigt(0.0, sigma, 2.0 * gamma);
+        for (double x = 38.0; x <= 62.0; x += 1.0)
+        {
+            CHECK(ShapeValue(v, range, x)
+                  == doctest::Approx(TMath::Voigt(x - mean, sigma, 2.0 * gamma) / vPeak).epsilon(3e-3));
+        }
+    }
+
+    SUBCASE("step == TMath::Erfc")
+    {
+        double edge = 50.0, width = 3.0;
+        FitComponent st;
+        st.shape = ShapeKind::Step;
+        st.amplitude = { "amplitude", 1.0, false, std::nullopt, std::nullopt };
+        st.parameters = { { "edge", edge, false, std::nullopt, std::nullopt },
+                          { "width", width, false, std::nullopt, std::nullopt } };
+        for (double x = 25.0; x <= 75.0; x += 1.0)
+        {
+            CHECK(ShapeValue(st, range, x)
+                  == doctest::Approx(0.5 * TMath::Erfc((x - edge) / (std::sqrt(2.0) * width)))
+                         .epsilon(1e-9));
+        }
+    }
+
+    SUBCASE("polynomial and exponential backgrounds == ROOT pol/expo")
+    {
+        double pivot = (range.min + range.max) / 2.0; // RangePivot
+        auto sample = [&](const FitComponent& component, TF1& root) {
+            for (double x = 10.0; x <= 90.0; x += 5.0)
+            {
+                CHECK(ShapeValue(component, range, x) == doctest::Approx(root.Eval(x)).epsilon(1e-9));
+            }
+        };
+
+        double slope = -0.01, curvature = 0.0004;
+
+        FitComponent linear;
+        linear.shape = ShapeKind::Linear;
+        linear.amplitude = { "amplitude", 1.0, false, std::nullopt, std::nullopt };
+        linear.parameters = { { "slope", slope, false, std::nullopt, std::nullopt } };
+        TF1 pol1("fid_pol1", "pol1", range.min, range.max);
+        pol1.SetParameters(1.0 - slope * pivot, slope);
+        sample(linear, pol1);
+
+        FitComponent quadratic;
+        quadratic.shape = ShapeKind::Quadratic;
+        quadratic.amplitude = { "amplitude", 1.0, false, std::nullopt, std::nullopt };
+        quadratic.parameters = { { "slope", slope, false, std::nullopt, std::nullopt },
+                                 { "curvature", curvature, false, std::nullopt, std::nullopt } };
+        TF1 pol2("fid_pol2", "pol2", range.min, range.max);
+        pol2.SetParameters(1.0 - slope * pivot + curvature * pivot * pivot,
+                           slope - 2.0 * curvature * pivot, curvature);
+        sample(quadratic, pol2);
+
+        FitComponent exponential;
+        exponential.shape = ShapeKind::Exponential;
+        exponential.amplitude = { "amplitude", 1.0, false, std::nullopt, std::nullopt };
+        exponential.parameters = { { "slope", -0.02, false, std::nullopt, std::nullopt } };
+        TF1 expo("fid_expo", "expo", range.min, range.max);
+        expo.SetParameters(0.02 * pivot, -0.02);
+        sample(exponential, expo);
+
+        FitComponent constant;
+        constant.shape = ShapeKind::Constant;
+        constant.amplitude = { "amplitude", 1.0, false, std::nullopt, std::nullopt };
+        for (double x = 10.0; x <= 90.0; x += 20.0)
+        {
+            CHECK(ShapeValue(constant, range, x) == doctest::Approx(1.0));
+        }
+    }
+
+    // gaussian_tail (gf3/Hypermet) and custom have no ROOT native equivalent.
 }
 
 TEST_CASE("bad custom formulas and empty models fail gracefully")

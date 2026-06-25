@@ -22,6 +22,7 @@ const ShapeKind kPeakShapes[] = {
     ShapeKind::Lorentzian,
     ShapeKind::Voigt,
     ShapeKind::CrystalBall,
+    ShapeKind::Landau,
     ShapeKind::Custom,
 };
 
@@ -45,6 +46,10 @@ double DefaultParameterValue(const std::string& name, const FitRange& range)
     if (name == "sigma")
     {
         return (range.max - range.min) / 12.0;
+    }
+    if (name == "scale")
+    {
+        return (range.max - range.min) / 20.0; // landau is sharper than a gaussian
     }
     if (name == "gamma")
     {
@@ -106,6 +111,10 @@ void ConvertComponentShape(FitComponent& component, ShapeKind to, const FitRange
             width = gamma.value() / 1.177410023;
         }
     }
+    if (!width.has_value())
+    {
+        width = currentValue("scale"); // carry the landau scale across as a width
+    }
 
     component.shape = to;
     component.parameters.clear();
@@ -134,6 +143,10 @@ void ConvertComponentShape(FitComponent& component, ShapeKind to, const FitRange
         {
             value = width.value(); // a tail about one sigma long to start
         }
+        if (name == "scale" && width.has_value())
+        {
+            value = width.value(); // landau scale carries the gaussian width
+        }
 
         FitParameter parameter{ name, value, false, std::nullopt, std::nullopt };
         if (name == "tail_fraction")
@@ -141,7 +154,7 @@ void ConvertComponentShape(FitComponent& component, ShapeKind to, const FitRange
             parameter.lowerBound = 0.0; // a fraction stays one
             parameter.upperBound = 1.0;
         }
-        if (name == "tail_length" || name == "width")
+        if (name == "tail_length" || name == "width" || name == "scale")
         {
             parameter.lowerBound = 0.0;
         }

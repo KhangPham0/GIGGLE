@@ -22,6 +22,7 @@ const std::vector<ShapeEntry>& ShapeTable()
         { ShapeKind::Lorentzian,   "lorentzian",    { "mean", "gamma" } },
         { ShapeKind::Voigt,        "voigt",         { "mean", "sigma", "gamma" } },
         { ShapeKind::CrystalBall,  "crystal_ball",  { "mean", "sigma", "alpha", "n" } },
+        { ShapeKind::Landau,       "landau",        { "mean", "scale" } },
         { ShapeKind::Constant,     "constant",      {} },
         { ShapeKind::Linear,       "linear",        { "slope" } },
         { ShapeKind::Quadratic,    "quadratic",     { "slope", "curvature" } },

@@ -139,6 +139,80 @@ double SimpsonIntegral(const std::function<double(double)>& f, double a, double 
     return sum * h / 3.0;
 }
 
+// The standard Landau density phi(lambda), via the Kolbig-Schorr rational
+// approximation (CERNLIB G110 DENLAN) -- the same one ROOT's TMath::Landau
+// uses, reimplemented here so core stays free of ROOT. Peaks near
+// lambda = -0.2228 with a heavy tail toward positive lambda.
+double LandauDensity(double v)
+{
+    static const double p1[] = { 0.4259894875, -0.1249762550, 0.03984243700, -0.006298287635, 0.001511162253 };
+    static const double q1[] = { 1.0, -0.3388260629, 0.09594393323, -0.01608042283, 0.003778942063 };
+    static const double p2[] = { 0.1788541609, 0.1173957403, 0.01488850518, -0.001394989411, 0.0001283617211 };
+    static const double q2[] = { 1.0, 0.7428795082, 0.3153932961, 0.06694219548, 0.008790609714 };
+    static const double p3[] = { 0.1788544503, 0.09359161662, 0.006325387654, 0.00006611667319, -0.000002031049101 };
+    static const double q3[] = { 1.0, 0.6097809921, 0.2560616665, 0.04746722384, 0.006957301675 };
+    static const double p4[] = { 0.9874054407, 118.6723273, 849.2794360, -743.7792444, 427.0262186 };
+    static const double q4[] = { 1.0, 106.8615961, 337.6496214, 2016.712389, 1597.063511 };
+    static const double p5[] = { 1.003675074, 167.5702434, 4789.711289, 21217.86767, -22324.94910 };
+    static const double q5[] = { 1.0, 156.9424537, 3745.310488, 9834.698876, 66924.28357 };
+    static const double p6[] = { 1.000827619, 664.9143136, 62972.92665, 475554.6998, -5743609.109 };
+    static const double q6[] = { 1.0, 651.4101098, 56974.73333, 165917.4725, -2815759.939 };
+    static const double a1[] = { 0.04166666667, -0.01996527778, 0.02709538966 };
+    static const double a2[] = { -1.845568670, -4.284640743 };
+
+    if (v < -5.5)
+    {
+        double u = std::exp(v + 1.0);
+        if (u < 1e-10)
+        {
+            return 0.0;
+        }
+        return 0.3989422803 * std::exp(-1.0 / u) / std::sqrt(u)
+               * (1.0 + (a1[0] + (a1[1] + a1[2] * u) * u) * u);
+    }
+    if (v < -1.0)
+    {
+        double u = std::exp(-v - 1.0);
+        return std::exp(-u) * std::sqrt(u)
+               * (p1[0] + (p1[1] + (p1[2] + (p1[3] + p1[4] * v) * v) * v) * v)
+               / (q1[0] + (q1[1] + (q1[2] + (q1[3] + q1[4] * v) * v) * v) * v);
+    }
+    if (v < 1.0)
+    {
+        return (p2[0] + (p2[1] + (p2[2] + (p2[3] + p2[4] * v) * v) * v) * v)
+               / (q2[0] + (q2[1] + (q2[2] + (q2[3] + q2[4] * v) * v) * v) * v);
+    }
+    if (v < 5.0)
+    {
+        return (p3[0] + (p3[1] + (p3[2] + (p3[3] + p3[4] * v) * v) * v) * v)
+               / (q3[0] + (q3[1] + (q3[2] + (q3[3] + q3[4] * v) * v) * v) * v);
+    }
+    if (v < 12.0)
+    {
+        double u = 1.0 / v;
+        return u * u * (p4[0] + (p4[1] + (p4[2] + (p4[3] + p4[4] * u) * u) * u) * u)
+               / (q4[0] + (q4[1] + (q4[2] + (q4[3] + q4[4] * u) * u) * u) * u);
+    }
+    if (v < 50.0)
+    {
+        double u = 1.0 / v;
+        return u * u * (p5[0] + (p5[1] + (p5[2] + (p5[3] + p5[4] * u) * u) * u) * u)
+               / (q5[0] + (q5[1] + (q5[2] + (q5[3] + q5[4] * u) * u) * u) * u);
+    }
+    if (v < 300.0)
+    {
+        double u = 1.0 / v;
+        return u * u * (p6[0] + (p6[1] + (p6[2] + (p6[3] + p6[4] * u) * u) * u) * u)
+               / (q6[0] + (q6[1] + (q6[2] + (q6[3] + q6[4] * u) * u) * u) * u);
+    }
+    double u = 1.0 / (v - v * std::log(v) / (v + 1.0));
+    return u * u * (1.0 + (a2[0] + a2[1] * u) * u);
+}
+
+// The Landau density's peak value, used to normalize the shape to 1 there.
+const double kLandauPeakLambda = -0.22278298;
+const double kLandauPeakValue = LandauDensity(kLandauPeakLambda);
+
 // Copies a component's parameter values into a flat array. Implemented
 // shapes have at most 3 parameters.
 int FlattenParameters(const FitComponent& component, double* buffer, int capacity)
@@ -216,6 +290,18 @@ double ShapeValue(ShapeKind kind, const double* p, int count, double x, double p
             double bCoef = n / alpha - alpha;
             return aCoef * std::pow(bCoef - t, -n);
         }
+        case ShapeKind::Landau:
+        {
+            // Placed so the density's peak sits at the mean, and normalized
+            // to 1 there. The heavy tail runs to the high-energy side.
+            double mean = Param(p, count, 0);
+            double scale = std::max(std::abs(Param(p, count, 1, 1.0)), 1e-12);
+            // Shift the location so the density's peak (at kLandauPeakLambda)
+            // lands at the mean, then normalize to 1 there.
+            double location = mean - kLandauPeakLambda * scale;
+            double lambda = (x - location) / scale;
+            return LandauDensity(lambda) / kLandauPeakValue;
+        }
         case ShapeKind::GaussianTail:
         {
             TailShapeParts parts = TailParts(p, count);
@@ -284,6 +370,7 @@ double ShapeIntegral(ShapeKind kind, const double* p, int count, double a, doubl
         }
         case ShapeKind::Voigt:
         case ShapeKind::CrystalBall:
+        case ShapeKind::Landau:
             return SimpsonIntegral(
                 [&](double x) { return ShapeValue(kind, p, count, x, pivot); }, a, b);
         case ShapeKind::GaussianTail:
@@ -408,9 +495,10 @@ std::optional<ValueWithError> PeakCentroid(ShapeKind kind, const ComponentResult
         case ShapeKind::Lorentzian:
         case ShapeKind::Voigt:
         case ShapeKind::CrystalBall:
-            // The first parameter is the mean. (For the tailed gaussian and
-            // crystal ball this is the position of the gaussian core, as in
-            // gf3, not the center of gravity of the asymmetric profile.)
+        case ShapeKind::Landau:
+            // The first parameter is the mean. (For the tailed gaussian,
+            // crystal ball, and landau this is the position of the peak, as
+            // in gf3, not the center of gravity of the asymmetric profile.)
             if (!result.parameters.empty())
             {
                 return result.parameters[0];
@@ -506,6 +594,13 @@ std::optional<ValueWithError> PeakFWHM(ShapeKind kind, const ComponentResult& re
         case ShapeKind::CrystalBall:
             // Asymmetric (power-law tail), so the width is found numerically.
             if (result.parameters.size() >= 4)
+            {
+                return NumericFWHM(kind, result);
+            }
+            return std::nullopt;
+        case ShapeKind::Landau:
+            // Asymmetric (heavy high-energy tail); width found numerically.
+            if (result.parameters.size() >= 2)
             {
                 return NumericFWHM(kind, result);
             }

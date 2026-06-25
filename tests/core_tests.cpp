@@ -228,6 +228,32 @@ TEST_CASE("crystal ball: gaussian core, power-law low-energy tail, sane counts")
     CHECK(ComponentCounts(cb, range) == doctest::Approx(reference).epsilon(1e-3));
 }
 
+TEST_CASE("landau: sharp peak with a heavy high-energy tail, sane counts")
+{
+    FitRange range{ 120.0, 300.0 };
+    FitComponent landau = MakeComponent(ShapeKind::Landau, 30.0, { 175.0, 6.0 });
+
+    CHECK(ShapeValue(landau, range, 175.0) == doctest::Approx(1.0)); // 1 at the peak
+
+    // Heavy tail on the high-energy side; fast drop on the low side.
+    double high = ShapeValue(landau, range, 175.0 + 8.0 * 6.0);
+    double low = ShapeValue(landau, range, 175.0 - 8.0 * 6.0);
+    CHECK(high > 10.0 * low);
+    CHECK(low < 0.02);
+
+    const int steps = 60000;
+    double dx = (range.max - range.min) / steps;
+    double reference = 0.0;
+    for (int i = 0; i < steps; ++i)
+    {
+        reference += 0.5
+                     * (ComponentDensity(landau, range, range.min + i * dx)
+                        + ComponentDensity(landau, range, range.min + (i + 1) * dx))
+                     * dx;
+    }
+    CHECK(ComponentCounts(landau, range) == doctest::Approx(reference).epsilon(3e-3));
+}
+
 TEST_CASE("count errors propagate through the covariance")
 {
     // A Gaussian fully inside a wide range: N = A * sigma * sqrt(2 pi),

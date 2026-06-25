@@ -27,6 +27,7 @@ enum class ShapeKind
     Lorentzian,
     Voigt,
     CrystalBall, // gaussian core + low-energy power-law tail (detector response)
+    Landau,      // energy-loss / straggling lineshape, heavy high-energy tail
     Constant,
     Linear,
     Quadratic,
