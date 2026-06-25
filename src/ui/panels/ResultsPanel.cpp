@@ -7,6 +7,7 @@
 #include "imgui.h"
 
 #include "core/Shapes.h"
+#include "ui/Widgets.h"
 #include "ui/fonts/IconsFontAwesome5.h"
 
 namespace giggle {
@@ -80,7 +81,7 @@ ResultsAction ResultsPanel::Draw(const FitResult* result, const HistogramData* h
             ImGui::Separator();
             if (model != nullptr)
             {
-                DrawComponentsTable(*result, *model, monoFont);
+                DrawComponentsTable(*result, *model, theme, monoFont);
             }
             DrawWarnings(*result, theme);
 
@@ -162,7 +163,7 @@ void ResultsPanel::DrawSummaryLine(const FitResult& result, const Theme& theme, 
 }
 
 void ResultsPanel::DrawComponentsTable(const FitResult& result, const FitModel& model,
-                                       ImFont* monoFont)
+                                       const Theme& theme, ImFont* monoFont)
 {
     ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
                             | ImGuiTableFlags_SizingStretchProp;
@@ -206,7 +207,7 @@ void ResultsPanel::DrawComponentsTable(const FitResult& result, const FitModel& 
     // The raw fitted parameters, for the record. Amplitudes show in the
     // same plot units as the Fit Model panel (height/level in counts);
     // exports keep the raw density value.
-    if (ImGui::TreeNode("All parameters"))
+    if (SubTree("All parameters", theme))
     {
         ImGui::PushFont(monoFont, 0.0f);
         auto listComponent = [&](const ComponentResult& component, const FitComponent& modelComponent,

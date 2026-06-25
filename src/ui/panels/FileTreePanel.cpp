@@ -40,7 +40,7 @@ void FileTreePanel::SetContents(const std::string& fileName, const std::vector<H
     }
 }
 
-FileTreeAction FileTreePanel::Draw(const std::string& selectedPath)
+FileTreeAction FileTreePanel::Draw(const std::string& selectedPath, const Theme& theme)
 {
     FileTreeAction action;
 
@@ -57,7 +57,10 @@ FileTreeAction FileTreePanel::Draw(const std::string& selectedPath)
         }
         else
         {
-            ImGui::TextWrapped("%s", m_fileName.c_str());
+            // The open file's name as a distinct title above its histograms.
+            ImGui::PushStyleColor(ImGuiCol_Text, theme.accent);
+            ImGui::TextWrapped(ICON_FA_DATABASE "  %s", m_fileName.c_str());
+            ImGui::PopStyleColor();
             ImGui::Separator();
             DrawNode(m_root, selectedPath, action);
         }

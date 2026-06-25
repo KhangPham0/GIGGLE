@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/SpectrumSource.h"
+#include "ui/Theme.h"
 
 namespace giggle {
 
@@ -26,7 +27,7 @@ public:
     // Called when a file is opened; rebuilds the directory tree.
     void SetContents(const std::string& fileName, const std::vector<HistogramInfo>& histograms);
 
-    FileTreeAction Draw(const std::string& selectedPath);
+    FileTreeAction Draw(const std::string& selectedPath, const Theme& theme);
 
 private:
     // Histograms arranged by directory. Map keeps directories sorted by name.

@@ -25,6 +25,10 @@ struct Theme
     ImVec4 accentHover;
     ImVec4 accentActive;
 
+    // A second highlight, distinct from the accent, marking the focused
+    // panel -- so "which panel is active" reads apart from the teal headers.
+    ImVec4 highlight;
+
     // Text
     ImVec4 textPrimary;
     ImVec4 textDisabled;

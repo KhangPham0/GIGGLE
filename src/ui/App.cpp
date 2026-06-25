@@ -243,7 +243,7 @@ void App::DrawFrame()
 
     if (m_showFileTree)
     {
-        FileTreeAction action = m_fileTreePanel.Draw(m_selectedHistogram);
+        FileTreeAction action = m_fileTreePanel.Draw(m_selectedHistogram, m_theme);
         if (action.openFileRequested)
         {
             OpenFileDialog();

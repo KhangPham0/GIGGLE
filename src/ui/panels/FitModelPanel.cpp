@@ -9,6 +9,7 @@
 #include "imgui_stdlib.h"
 
 #include "core/Shapes.h"
+#include "ui/Widgets.h"
 #include "ui/fonts/IconsFontAwesome5.h"
 
 namespace giggle {
@@ -322,14 +323,18 @@ FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogr
         }
         else
         {
-            DrawRangeSection(model, *histogram, monoFont);
+            // An upfront tip for the value fields below, rather than a line
+            // stranded down by the action buttons.
+            ImGui::TextDisabled("right-click a value to set bounds");
+            ImGui::Spacing();
+
+            DrawRangeSection(model, *histogram, theme, monoFont);
             DrawPeaksSection(model, *histogram, monoFont, theme, validator);
             DrawBackgroundSection(model, *histogram, monoFont, theme, validator);
-            DrawStatisticSection(model);
+            DrawStatisticSection(model, theme);
 
             ImGui::Spacing();
             ImGui::Separator();
-            ImGui::TextDisabled("right-click a value to set bounds");
             ImGui::Spacing();
 
             // Presets: the whole model as a JSON file, reusable across the
@@ -376,9 +381,9 @@ FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogr
 }
 
 void FitModelPanel::DrawRangeSection(FitModel& model, const HistogramData& histogram,
-                                     ImFont* monoFont)
+                                     const Theme& theme, ImFont* monoFont)
 {
-    if (!ImGui::CollapsingHeader("Fit Range", ImGuiTreeNodeFlags_DefaultOpen))
+    if (!SectionHeader("Fit Range", theme, ImGuiTreeNodeFlags_DefaultOpen))
     {
         return;
     }
@@ -415,7 +420,7 @@ void FitModelPanel::DrawPeaksSection(FitModel& model, const HistogramData& histo
                                      ImFont* monoFont, const Theme& theme,
                                      const FormulaValidator& validator)
 {
-    if (!ImGui::CollapsingHeader("Peaks", ImGuiTreeNodeFlags_DefaultOpen))
+    if (!SectionHeader("Peaks", theme, ImGuiTreeNodeFlags_DefaultOpen))
     {
         return;
     }
@@ -431,7 +436,7 @@ void FitModelPanel::DrawPeaksSection(FitModel& model, const HistogramData& histo
         FitComponent& peak = model.peaks[i];
         ImGui::PushID(static_cast<int>(i));
 
-        ImGui::SeparatorText(peak.label.c_str());
+        SubHeader(peak.label.c_str(), theme);
         DrawShapeCombo(peak, kPeakShapes, static_cast<int>(std::size(kPeakShapes)), model.range);
         if (peak.shape == ShapeKind::Custom)
         {
@@ -473,7 +478,7 @@ void FitModelPanel::DrawBackgroundSection(FitModel& model, const HistogramData& 
                                           ImFont* monoFont, const Theme& theme,
                                           const FormulaValidator& validator)
 {
-    if (!ImGui::CollapsingHeader("Background", ImGuiTreeNodeFlags_DefaultOpen))
+    if (!SectionHeader("Background", theme, ImGuiTreeNodeFlags_DefaultOpen))
     {
         return;
     }
@@ -574,9 +579,9 @@ void FitModelPanel::DrawFormulaEditor(FitComponent& component, const Theme& them
     ImGui::PopID();
 }
 
-void FitModelPanel::DrawStatisticSection(FitModel& model)
+void FitModelPanel::DrawStatisticSection(FitModel& model, const Theme& theme)
 {
-    if (!ImGui::CollapsingHeader("Fit Settings", ImGuiTreeNodeFlags_DefaultOpen))
+    if (!SectionHeader("Fit Settings", theme, ImGuiTreeNodeFlags_DefaultOpen))
     {
         return;
     }
@@ -618,7 +623,7 @@ void FitModelPanel::DrawStatisticSection(FitModel& model)
                "narrow or steeply curving peaks; slightly slower. Negligible\n"
                "when peaks span many bins.");
 
-    if (ImGui::TreeNode("Advanced"))
+    if (SubTree("Advanced", theme))
     {
         ImGui::Checkbox("Ignore bin errors (unweighted)", &model.ignoreBinErrors);
         HelpMarker("Treat every bin as equally weighted (error = 1) instead of\n"

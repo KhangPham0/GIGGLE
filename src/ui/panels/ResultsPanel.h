@@ -31,7 +31,8 @@ public:
 
 private:
     void DrawSummaryLine(const FitResult& result, const Theme& theme, ImFont* monoFont);
-    void DrawComponentsTable(const FitResult& result, const FitModel& model, ImFont* monoFont);
+    void DrawComponentsTable(const FitResult& result, const FitModel& model, const Theme& theme,
+                             ImFont* monoFont);
     void DrawWarnings(const FitResult& result, const Theme& theme);
 
     // For showing amplitudes in plot units; set each Draw.

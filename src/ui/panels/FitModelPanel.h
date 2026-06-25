@@ -38,12 +38,13 @@ public:
                         const FormulaValidator& validator);
 
 private:
-    void DrawRangeSection(FitModel& model, const HistogramData& histogram, ImFont* monoFont);
+    void DrawRangeSection(FitModel& model, const HistogramData& histogram, const Theme& theme,
+                          ImFont* monoFont);
     void DrawPeaksSection(FitModel& model, const HistogramData& histogram, ImFont* monoFont,
                           const Theme& theme, const FormulaValidator& validator);
     void DrawBackgroundSection(FitModel& model, const HistogramData& histogram, ImFont* monoFont,
                                const Theme& theme, const FormulaValidator& validator);
-    void DrawStatisticSection(FitModel& model);
+    void DrawStatisticSection(FitModel& model, const Theme& theme);
 
     // The formula field with its Apply button; shown for custom components.
     void DrawFormulaEditor(FitComponent& component, const Theme& theme,

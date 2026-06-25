@@ -27,6 +27,10 @@ Theme DarkTheme()
     t.accentHover  = Hex(0x3BD9C8);
     t.accentActive = Hex(0x1FA396);
 
+    t.highlight    = Hex(0xE0A24A); // warm gold: the active-panel marker
+
+
+
     t.textPrimary  = Hex(0xE8E8EC);
     t.textDisabled = Hex(0x8B8B95);
 
@@ -124,13 +128,23 @@ void ApplyTheme(const Theme& t)
     colors[ImGuiCol_ResizeGripHovered] = t.accentHover;
     colors[ImGuiCol_ResizeGripActive]  = t.accentActive;
 
-    colors[ImGuiCol_Tab]                       = t.windowBackground;
-    colors[ImGuiCol_TabHovered]                = t.frameHover;
-    colors[ImGuiCol_TabSelected]               = t.panelBackground;
-    colors[ImGuiCol_TabSelectedOverline]       = t.accent;
-    colors[ImGuiCol_TabDimmed]                 = t.windowBackground;
-    colors[ImGuiCol_TabDimmedSelected]         = t.panelBackground;
-    colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0, 0, 0, 0);
+    // Panel names read in teal by default; the focused panel switches to the
+    // gold highlight, so the active panel stands out among the teal tabs.
+    auto mix = [](const ImVec4& base, const ImVec4& tint, float amount) {
+        return ImVec4((1.0f - amount) * base.x + amount * tint.x,
+                      (1.0f - amount) * base.y + amount * tint.y,
+                      (1.0f - amount) * base.z + amount * tint.z, 1.0f);
+    };
+    ImVec4 tealTab      = mix(t.panelBackground, t.accent, 0.28f);
+    ImVec4 tealTabHover = mix(t.panelBackground, t.accent, 0.42f);
+    ImVec4 goldTab      = mix(t.panelBackground, t.highlight, 0.30f);
+    colors[ImGuiCol_Tab]                       = tealTab;
+    colors[ImGuiCol_TabHovered]                = tealTabHover;
+    colors[ImGuiCol_TabSelected]               = goldTab;
+    colors[ImGuiCol_TabSelectedOverline]       = t.highlight;
+    colors[ImGuiCol_TabDimmed]                 = tealTab;
+    colors[ImGuiCol_TabDimmedSelected]         = tealTab;
+    colors[ImGuiCol_TabDimmedSelectedOverline] = t.accent;
 
     colors[ImGuiCol_DockingPreview] = ImVec4(t.accent.x, t.accent.y, t.accent.z, 0.55f);
     colors[ImGuiCol_DockingEmptyBg] = t.windowBackground;
