@@ -14,16 +14,26 @@ namespace giggle {
 
 namespace {
 
-// "12345.6 +- 78.9", or "-" for an absent quantity.
+// "12345.6 +- 78.9", or "12345.6 +90 / -88" for an asymmetric (MINOS)
+// quantity, or "-" for an absent one.
+std::string Formatted(const ValueWithError& quantity)
+{
+    char buffer[96];
+    if (quantity.asymmetric())
+    {
+        std::snprintf(buffer, sizeof(buffer), "%.6g  +%.3g / -%.3g", quantity.value,
+                      quantity.errorHigh.value(), quantity.errorLow.value());
+    }
+    else
+    {
+        std::snprintf(buffer, sizeof(buffer), "%.6g +- %.3g", quantity.value, quantity.error);
+    }
+    return buffer;
+}
+
 std::string Formatted(const std::optional<ValueWithError>& quantity)
 {
-    if (!quantity.has_value())
-    {
-        return "-";
-    }
-    char buffer[64];
-    std::snprintf(buffer, sizeof(buffer), "%.6g +- %.3g", quantity->value, quantity->error);
-    return buffer;
+    return quantity.has_value() ? Formatted(quantity.value()) : "-";
 }
 
 } // namespace
@@ -77,6 +87,16 @@ ResultsAction ResultsPanel::Draw(const FitResult* result, const HistogramData* h
                                             ? "chi-square"
                                             : "Poisson likelihood";
                 ImGui::TextDisabled("Minuit2 \xc2\xb7 %s \xc2\xb7 %s", algorithm, statistic);
+
+                // With MINOS, the parameters carry asymmetric errors but the
+                // counts stay symmetric -- say so, so the table isn't misread.
+                if (model->uncertainties == FitUncertainties::Minos)
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Text, theme.textDisabled);
+                    ImGui::TextWrapped("Parameter errors are MINOS (asymmetric); counts use the "
+                                       "symmetric (parabolic) error.");
+                    ImGui::PopStyleColor();
+                }
             }
             ImGui::Separator();
             if (model != nullptr)
@@ -227,15 +247,27 @@ void ResultsPanel::DrawComponentsTable(const FitResult& result, const FitModel& 
                                : BinWidthAt(*m_histogramForUnits, position);
             const char* amplitudeLabel = custom ? "amplitude" : (isPeak ? "height" : "level");
 
-            ImGui::Text("%-12s  %-9s = %10.6g +- %-8.3g", component.label.c_str(), amplitudeLabel,
-                        component.amplitude.value * scale, component.amplitude.error * scale);
+            // The amplitude shows in plot units, so its errors scale too,
+            // asymmetric MINOS magnitudes included.
+            ValueWithError amplitude = component.amplitude;
+            amplitude.value *= scale;
+            amplitude.error *= scale;
+            if (amplitude.errorLow.has_value())
+            {
+                amplitude.errorLow = amplitude.errorLow.value() * scale;
+            }
+            if (amplitude.errorHigh.has_value())
+            {
+                amplitude.errorHigh = amplitude.errorHigh.value() * scale;
+            }
+            ImGui::Text("%-12s  %-9s = %s", component.label.c_str(), amplitudeLabel,
+                        Formatted(amplitude).c_str());
             for (size_t j = 0; j < component.parameters.size(); ++j)
             {
                 const char* name = j < modelComponent.parameters.size()
                                        ? modelComponent.parameters[j].name.c_str()
                                        : "?";
-                ImGui::Text("%-12s  %-9s = %10.6g +- %-8.3g", "", name,
-                            component.parameters[j].value, component.parameters[j].error);
+                ImGui::Text("%-12s  %-9s = %s", "", name, Formatted(component.parameters[j]).c_str());
             }
         };
         for (size_t i = 0; i < result.peaks.size() && i < model.peaks.size(); ++i)

@@ -617,6 +617,18 @@ void FitModelPanel::DrawStatisticSection(FitModel& model, const Theme& theme)
                "for fits that won't converge; Combination runs MIGRAD then\n"
                "SIMPLEX. Uncertainties are filled in afterward either way.");
 
+    const char* uncertaintyNames[] = { "Parabolic", "MINOS" };
+    int uncertainties = static_cast<int>(model.uncertainties);
+    ImGui::SetNextItemWidth(comboWidth);
+    if (ImGui::Combo("uncertainties", &uncertainties, uncertaintyNames, 2))
+    {
+        model.uncertainties = static_cast<FitUncertainties>(uncertainties);
+    }
+    HelpMarker("Parabolic (HESSE) gives fast, symmetric errors. MINOS profiles\n"
+               "each parameter for asymmetric errors - slower, but better near\n"
+               "bounds or for non-parabolic likelihoods. The counts keep the\n"
+               "symmetric error for now.");
+
     ImGui::Checkbox("Integrate over bins", &model.integrateBins);
     HelpMarker("Compare each bin to the function's integral over the bin\n"
                "instead of its value at the bin center. More accurate for\n"
