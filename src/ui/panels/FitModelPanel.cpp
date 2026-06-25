@@ -154,7 +154,8 @@ void ConvertComponentShape(FitComponent& component, ShapeKind to, const FitRange
             parameter.lowerBound = 0.0; // a fraction stays one
             parameter.upperBound = 1.0;
         }
-        if (name == "tail_length" || name == "width" || name == "scale")
+        if (name == "tail_length" || name == "width" || name == "scale"
+            || name == "sigma" || name == "gamma")
         {
             parameter.lowerBound = 0.0;
         }
@@ -225,9 +226,9 @@ FitComponent MakeDefaultBackground(ShapeKind shape, const FitRange& range,
                            ? 0.0
                            : DefaultParameterValue(name, range);
         FitParameter parameter{ name, value, false, std::nullopt, std::nullopt };
-        if (name == "width")
+        if (name == "width" || name == "sigma" || name == "gamma")
         {
-            parameter.lowerBound = 0.0;
+            parameter.lowerBound = 0.0; // widths stay non-negative
         }
         background.parameters.push_back(parameter);
     }

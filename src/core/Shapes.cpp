@@ -797,7 +797,7 @@ FitComponent SuggestGaussianPeak(const HistogramData& histogram, const FitRange&
                        false, 0.0, std::nullopt };
     peak.parameters = {
         { "mean", mean, false, std::nullopt, std::nullopt },
-        { "sigma", sigma, false, std::nullopt, std::nullopt },
+        { "sigma", sigma, false, 0.0, std::nullopt }, // width stays non-negative
     };
     return peak;
 }

@@ -604,6 +604,8 @@ TEST_CASE("a clicked peak is guessed from the data around the click")
     // Height above baseline, in density units: ~400 counts / 0.5 width.
     CHECK(guess.amplitude.value == doctest::Approx(800.0).epsilon(0.15));
     CHECK(guess.amplitude.lowerBound == 0.0);
+    // The width is bounded non-negative, like the height.
+    CHECK(guess.parameters[1].lowerBound == 0.0);
 
     // A click in flat background gives a small, sane guess instead of
     // something absurd.
