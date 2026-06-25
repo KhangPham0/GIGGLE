@@ -26,6 +26,7 @@ enum class ShapeKind
     GaussianTail, // gaussian + low-energy exponential tail (gf3/Hypermet style)
     Lorentzian,
     Voigt,
+    CrystalBall, // gaussian core + low-energy power-law tail (detector response)
     Constant,
     Linear,
     Quadratic,

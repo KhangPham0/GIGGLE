@@ -21,6 +21,7 @@ const std::vector<ShapeEntry>& ShapeTable()
         { ShapeKind::GaussianTail, "gaussian_tail", { "mean", "sigma", "tail_fraction", "tail_length" } },
         { ShapeKind::Lorentzian,   "lorentzian",    { "mean", "gamma" } },
         { ShapeKind::Voigt,        "voigt",         { "mean", "sigma", "gamma" } },
+        { ShapeKind::CrystalBall,  "crystal_ball",  { "mean", "sigma", "alpha", "n" } },
         { ShapeKind::Constant,     "constant",      {} },
         { ShapeKind::Linear,       "linear",        { "slope" } },
         { ShapeKind::Quadratic,    "quadratic",     { "slope", "curvature" } },

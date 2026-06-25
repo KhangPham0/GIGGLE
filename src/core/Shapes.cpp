@@ -199,6 +199,23 @@ double ShapeValue(ShapeKind kind, const double* p, int count, double x, double p
             return std::exp(Param(p, count, 0) * (x - pivot));
         case ShapeKind::Voigt:
             return VoigtShape(x - Param(p, count, 0), Param(p, count, 1, 1.0), Param(p, count, 2));
+        case ShapeKind::CrystalBall:
+        {
+            // Gaussian core; below t = -alpha it switches to a power-law
+            // tail that joins the core smoothly. The core is 1 at the mean.
+            double mean = Param(p, count, 0);
+            double sigma = std::max(std::abs(Param(p, count, 1, 1.0)), 1e-12);
+            double alpha = std::max(std::abs(Param(p, count, 2, 1.0)), 1e-6);
+            double n = std::max(Param(p, count, 3, 2.0), 1.0 + 1e-6);
+            double t = (x - mean) / sigma;
+            if (t > -alpha)
+            {
+                return std::exp(-0.5 * t * t);
+            }
+            double aCoef = std::pow(n / alpha, n) * std::exp(-0.5 * alpha * alpha);
+            double bCoef = n / alpha - alpha;
+            return aCoef * std::pow(bCoef - t, -n);
+        }
         case ShapeKind::GaussianTail:
         {
             TailShapeParts parts = TailParts(p, count);
@@ -266,6 +283,7 @@ double ShapeIntegral(ShapeKind kind, const double* p, int count, double a, doubl
             return (std::exp(slope * (b - pivot)) - std::exp(slope * (a - pivot))) / slope;
         }
         case ShapeKind::Voigt:
+        case ShapeKind::CrystalBall:
             return SimpsonIntegral(
                 [&](double x) { return ShapeValue(kind, p, count, x, pivot); }, a, b);
         case ShapeKind::GaussianTail:
@@ -389,9 +407,10 @@ std::optional<ValueWithError> PeakCentroid(ShapeKind kind, const ComponentResult
         case ShapeKind::GaussianTail:
         case ShapeKind::Lorentzian:
         case ShapeKind::Voigt:
-            // The first parameter is the mean. (For the tailed gaussian
-            // this is the position of the gaussian core, as in gf3, not
-            // the center of gravity of the asymmetric profile.)
+        case ShapeKind::CrystalBall:
+            // The first parameter is the mean. (For the tailed gaussian and
+            // crystal ball this is the position of the gaussian core, as in
+            // gf3, not the center of gravity of the asymmetric profile.)
             if (!result.parameters.empty())
             {
                 return result.parameters[0];
@@ -479,6 +498,13 @@ std::optional<ValueWithError> PeakFWHM(ShapeKind kind, const ComponentResult& re
     switch (kind)
     {
         case ShapeKind::GaussianTail:
+            if (result.parameters.size() >= 4)
+            {
+                return NumericFWHM(kind, result);
+            }
+            return std::nullopt;
+        case ShapeKind::CrystalBall:
+            // Asymmetric (power-law tail), so the width is found numerically.
             if (result.parameters.size() >= 4)
             {
                 return NumericFWHM(kind, result);

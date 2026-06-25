@@ -148,6 +148,7 @@ TEST_CASE("every shape is 1 at its reference point, so amplitude = density there
     CHECK(ShapeValue(MakeComponent(ShapeKind::Gaussian, 1, { 150.0, 5.0 }), range, 150.0) == doctest::Approx(1.0));
     CHECK(ShapeValue(MakeComponent(ShapeKind::GaussianTail, 1, { 150.0, 5.0, 0.3, 8.0 }), range, 150.0) == doctest::Approx(1.0));
     CHECK(ShapeValue(MakeComponent(ShapeKind::Lorentzian, 1, { 170.0, 4.0 }), range, 170.0) == doctest::Approx(1.0));
+    CHECK(ShapeValue(MakeComponent(ShapeKind::CrystalBall, 1, { 150.0, 5.0, 1.5, 3.0 }), range, 150.0) == doctest::Approx(1.0));
     // The step is 1 on its low-energy plateau.
     CHECK(ShapeValue(MakeComponent(ShapeKind::Step, 1, { 175.0, 2.0 }), range, 120.0) == doctest::Approx(1.0));
     CHECK(ShapeValue(MakeComponent(ShapeKind::Step, 1, { 175.0, 2.0 }), range, 175.0) == doctest::Approx(0.5));
@@ -198,6 +199,33 @@ TEST_CASE("component counts match the numeric integral of the density")
         CHECK(ComponentCounts(component, range)
               == doctest::Approx(numericIntegral(component)).epsilon(1e-6));
     }
+}
+
+TEST_CASE("crystal ball: gaussian core, power-law low-energy tail, sane counts")
+{
+    FitRange range{ 100.0, 250.0 };
+    FitComponent cb = MakeComponent(ShapeKind::CrystalBall, 50.0, { 175.0, 4.0, 1.2, 3.0 });
+
+    // Unit at the mean; the high-energy side is pure gaussian; the
+    // low-energy tail is much heavier than a gaussian's.
+    CHECK(ShapeValue(cb, range, 175.0) == doctest::Approx(1.0));
+    CHECK(ShapeValue(cb, range, 175.0 + 3.0 * 4.0)
+          == doctest::Approx(std::exp(-0.5 * 9.0)).epsilon(1e-9)); // +3 sigma: gaussian
+    double gaussianAtFiveSigma = std::exp(-0.5 * 25.0);
+    CHECK(ShapeValue(cb, range, 175.0 - 5.0 * 4.0) > 10.0 * gaussianAtFiveSigma); // tail
+
+    // The built-in (Simpson) integral matches a fine reference.
+    const int steps = 40000;
+    double dx = (range.max - range.min) / steps;
+    double reference = 0.0;
+    for (int i = 0; i < steps; ++i)
+    {
+        reference += 0.5
+                     * (ComponentDensity(cb, range, range.min + i * dx)
+                        + ComponentDensity(cb, range, range.min + (i + 1) * dx))
+                     * dx;
+    }
+    CHECK(ComponentCounts(cb, range) == doctest::Approx(reference).epsilon(1e-3));
 }
 
 TEST_CASE("count errors propagate through the covariance")

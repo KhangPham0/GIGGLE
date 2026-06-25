@@ -542,6 +542,71 @@ TEST_CASE("MINOS gives asymmetric parameter and count errors")
     CHECK(!minosResult.totalCounts.asymmetric());
 }
 
+TEST_CASE("a crystal ball peak fits end to end with calibrated counts")
+{
+    // A toy from a crystal ball truth, built with the same core math the
+    // engine uses, on a flat background.
+    FitComponent truth;
+    truth.shape = ShapeKind::CrystalBall;
+    truth.amplitude = { "amplitude", 70.0, false, std::nullopt, std::nullopt };
+    truth.parameters = {
+        { "mean", 50.0, false, std::nullopt, std::nullopt },
+        { "sigma", 3.0, false, std::nullopt, std::nullopt },
+        { "alpha", 1.2, false, std::nullopt, std::nullopt },
+        { "n", 3.0, false, std::nullopt, std::nullopt },
+    };
+    FitRange fitRange{ kFitLo, kFitHi };
+    double truthCounts = ComponentCounts(truth, fitRange);
+
+    HistogramData data;
+    data.name = "cb_toy";
+    const int binCount = 200;
+    for (int i = 0; i <= binCount; ++i)
+    {
+        data.binEdges.push_back(100.0 * i / binCount);
+    }
+    std::mt19937 rng(41);
+    for (int i = 0; i < binCount; ++i)
+    {
+        double expected = truth.amplitude.value
+                              * ShapeIntegral(truth, fitRange, data.binEdges[i], data.binEdges[i + 1])
+                          + 15.0 * (data.binEdges[i + 1] - data.binEdges[i]);
+        std::poisson_distribution<int> poisson(expected);
+        data.counts.push_back(poisson(rng));
+    }
+
+    FitModel model;
+    model.range = fitRange;
+    model.statistic = FitStatistic::PoissonLikelihood;
+
+    // alpha and n are fixed, as in real analyses where the tail shape comes
+    // from a calibration: free on modest statistics they trade off against
+    // sigma. Mean, sigma, and amplitude are fit.
+    FitComponent peak = truth;
+    peak.label = "Peak 1";
+    peak.amplitude = { "amplitude", 55.0, false, 0.0, std::nullopt };
+    peak.parameters[0].value = 49.0; // mean
+    peak.parameters[1].value = 3.5;  // sigma
+    peak.parameters[2] = { "alpha", 1.2, true, 0.0, std::nullopt };
+    peak.parameters[3] = { "n", 3.0, true, 1.0, std::nullopt };
+    model.peaks.push_back(peak);
+
+    FitComponent background;
+    background.label = "Background";
+    background.shape = ShapeKind::Constant;
+    background.amplitude = { "amplitude", 12.0, false, 0.0, std::nullopt };
+    model.background.push_back(background);
+
+    RootFitEngine engine;
+    FitResult result = engine.Fit(data, model);
+
+    REQUIRE(result.converged);
+    CHECK(std::abs(result.peaks[0].counts.value - truthCounts)
+          < 5.0 * result.peaks[0].counts.error);
+    CHECK(result.normSumCheck.performed);
+    CHECK(result.normSumCheck.agreed);
+}
+
 TEST_CASE("bad custom formulas and empty models fail gracefully")
 {
     RootFitEngine engine;

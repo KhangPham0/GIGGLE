@@ -57,7 +57,8 @@ double HalfWidthAtHalfMax(const FitComponent& peak)
     switch (peak.shape)
     {
         case ShapeKind::Gaussian:
-            return 1.177410023 * std::abs(peak.parameters[1].value); // sqrt(2 ln 2) sigma
+        case ShapeKind::CrystalBall:
+            return 1.177410023 * std::abs(peak.parameters[1].value); // sqrt(2 ln 2) sigma (core)
         case ShapeKind::Lorentzian:
             return std::abs(peak.parameters[1].value); // gamma
         case ShapeKind::Voigt:
@@ -85,6 +86,7 @@ void SetHalfWidthAtHalfMax(FitComponent& peak, double halfWidth)
     switch (peak.shape)
     {
         case ShapeKind::Gaussian:
+        case ShapeKind::CrystalBall:
             peak.parameters[1].value = halfWidth / 1.177410023;
             break;
         case ShapeKind::Lorentzian:

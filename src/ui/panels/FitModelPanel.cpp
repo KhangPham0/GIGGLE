@@ -21,6 +21,7 @@ const ShapeKind kPeakShapes[] = {
     ShapeKind::GaussianTail,
     ShapeKind::Lorentzian,
     ShapeKind::Voigt,
+    ShapeKind::CrystalBall,
     ShapeKind::Custom,
 };
 
@@ -60,6 +61,14 @@ double DefaultParameterValue(const std::string& name, const FitRange& range)
     if (name == "width")
     {
         return (range.max - range.min) / 100.0;
+    }
+    if (name == "alpha")
+    {
+        return 1.5; // tail begins 1.5 sigma below the mean
+    }
+    if (name == "n")
+    {
+        return 3.0; // power-law exponent
     }
     return 0.0;
 }
@@ -135,6 +144,14 @@ void ConvertComponentShape(FitComponent& component, ShapeKind to, const FitRange
         if (name == "tail_length" || name == "width")
         {
             parameter.lowerBound = 0.0;
+        }
+        if (name == "alpha")
+        {
+            parameter.lowerBound = 0.0; // tail start stays on the low side
+        }
+        if (name == "n")
+        {
+            parameter.lowerBound = 1.0; // power-law exponent above 1
         }
         component.parameters.push_back(parameter);
     }
