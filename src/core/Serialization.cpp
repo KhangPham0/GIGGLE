@@ -268,6 +268,9 @@ Json MakeResultsDocument(const Provenance& provenance, const FitModel& model, co
     Json resultJson;
     resultJson["converged"] = result.converged;
     resultJson["message"] = result.message;
+    // The algorithm and other settings already travel under "fit"; the
+    // library is recorded here so the method is fully on the record.
+    resultJson["minimizer"] = "Minuit2";
     resultJson["chi_square"] = result.chiSquare;
     resultJson["degrees_of_freedom"] = result.degreesOfFreedom;
     resultJson["reduced_chi_square"] =

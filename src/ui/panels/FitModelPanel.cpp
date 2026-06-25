@@ -294,6 +294,18 @@ DragLimits LimitsFor(const FitParameter& parameter, double scale)
     return limits;
 }
 
+// A dimmed "(?)" after the previous item that explains a setting on hover --
+// the discoverable replacement for the old fit-flags text box.
+void HelpMarker(const char* text)
+{
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("%s", text);
+    }
+}
+
 } // namespace
 
 FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogram,
@@ -569,11 +581,90 @@ void FitModelPanel::DrawStatisticSection(FitModel& model)
         return;
     }
 
-    const char* names[] = { "Chi-square", "Poisson likelihood" };
-    int current = model.statistic == FitStatistic::ChiSquare ? 0 : 1;
-    if (ImGui::Combo("statistic", &current, names, 2))
+    float comboWidth = ImGui::GetContentRegionAvail().x * 0.5f;
+
+    const char* statisticNames[] = { "Chi-square", "Poisson likelihood" };
+    int statistic = model.statistic == FitStatistic::ChiSquare ? 0 : 1;
+    ImGui::SetNextItemWidth(comboWidth);
+    if (ImGui::Combo("statistic", &statistic, statisticNames, 2))
     {
-        model.statistic = current == 0 ? FitStatistic::ChiSquare : FitStatistic::PoissonLikelihood;
+        model.statistic = statistic == 0 ? FitStatistic::ChiSquare : FitStatistic::PoissonLikelihood;
+    }
+    HelpMarker("Chi-square matches ROOT's convention. Poisson likelihood is the\n"
+               "better choice for low-count spectra.");
+
+    // Minuit2 is the only minimizer, by design -- so we say so plainly.
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Minimizer: Minuit2");
+    HelpMarker("GIGGLE fits with Minuit2 - ROOT's modern, actively maintained\n"
+               "minimizer, which supersedes the older Minuit and Fumili. Other\n"
+               "ROOT minimizers (GSL, Genetic) need a specially built ROOT, so\n"
+               "they aren't offered.");
+
+    const char* algorithmNames[] = { "MIGRAD", "SIMPLEX", "SCAN", "Combination" };
+    int algorithm = static_cast<int>(model.algorithm);
+    ImGui::SetNextItemWidth(comboWidth);
+    if (ImGui::Combo("algorithm", &algorithm, algorithmNames, 4))
+    {
+        model.algorithm = static_cast<MinimizerAlgorithm>(algorithm);
+    }
+    HelpMarker("MIGRAD is the standard. SIMPLEX and SCAN are slower fallbacks\n"
+               "for fits that won't converge; Combination runs MIGRAD then\n"
+               "SIMPLEX. Uncertainties are filled in afterward either way.");
+
+    ImGui::Checkbox("Integrate over bins", &model.integrateBins);
+    HelpMarker("Compare each bin to the function's integral over the bin\n"
+               "instead of its value at the bin center. More accurate for\n"
+               "narrow or steeply curving peaks; slightly slower. Negligible\n"
+               "when peaks span many bins.");
+
+    if (ImGui::TreeNode("Advanced"))
+    {
+        ImGui::Checkbox("Ignore bin errors (unweighted)", &model.ignoreBinErrors);
+        HelpMarker("Treat every bin as equally weighted (error = 1) instead of\n"
+                   "sqrt(N). For unweighted data.");
+
+        // Empty bins are always included for a likelihood fit.
+        bool likelihood = model.statistic == FitStatistic::PoissonLikelihood;
+        ImGui::BeginDisabled(likelihood);
+        bool countEmpty = model.countEmptyBins || likelihood;
+        if (ImGui::Checkbox("Count empty bins", &countEmpty))
+        {
+            model.countEmptyBins = countEmpty;
+        }
+        ImGui::EndDisabled();
+        HelpMarker("Include zero-count bins in the fit. Always on for Poisson\n"
+                   "likelihood.");
+
+        float fieldWidth = ImGui::GetContentRegionAvail().x * 0.4f;
+
+        ImGui::SetNextItemWidth(fieldWidth);
+        ImGui::InputDouble("max tolerance", &model.tolerance, 0.0, 0.0, "%.4g");
+        if (model.tolerance < 0.0)
+        {
+            model.tolerance = 0.0;
+        }
+        HelpMarker("Minuit2 convergence tolerance. 0 keeps Minuit2's default.");
+
+        ImGui::SetNextItemWidth(fieldWidth);
+        ImGui::InputInt("max iterations", &model.maxIterations, 0);
+        if (model.maxIterations < 0)
+        {
+            model.maxIterations = 0;
+        }
+        HelpMarker("Cap on minimizer iterations. 0 keeps Minuit2's default.");
+
+        const char* printNames[] = { "Quiet", "Normal", "Verbose" };
+        int printLevel = static_cast<int>(model.printLevel);
+        ImGui::SetNextItemWidth(comboWidth);
+        if (ImGui::Combo("print level", &printLevel, printNames, 3))
+        {
+            model.printLevel = static_cast<PrintLevel>(printLevel);
+        }
+        HelpMarker("Prints Minuit2's iteration detail to the terminal - visible\n"
+                   "only when GIGGLE is launched from a console.");
+
+        ImGui::TreePop();
     }
 }
 

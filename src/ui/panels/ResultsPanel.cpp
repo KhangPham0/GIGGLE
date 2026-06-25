@@ -61,6 +61,22 @@ ResultsAction ResultsPanel::Draw(const FitResult* result, const HistogramData* h
         else
         {
             DrawSummaryLine(*result, theme, monoFont);
+            if (model != nullptr)
+            {
+                // The method, on the record next to the numbers.
+                const char* algorithm = "MIGRAD";
+                switch (model->algorithm)
+                {
+                    case MinimizerAlgorithm::Migrad:      algorithm = "MIGRAD"; break;
+                    case MinimizerAlgorithm::Simplex:     algorithm = "SIMPLEX"; break;
+                    case MinimizerAlgorithm::Scan:        algorithm = "SCAN"; break;
+                    case MinimizerAlgorithm::Combination: algorithm = "Combination"; break;
+                }
+                const char* statistic = model->statistic == FitStatistic::ChiSquare
+                                            ? "chi-square"
+                                            : "Poisson likelihood";
+                ImGui::TextDisabled("Minuit2 \xc2\xb7 %s \xc2\xb7 %s", algorithm, statistic);
+            }
             ImGui::Separator();
             if (model != nullptr)
             {
