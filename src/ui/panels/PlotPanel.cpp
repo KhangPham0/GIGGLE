@@ -463,14 +463,35 @@ void PlotPanel::DrawBackgroundHandles(FitModel& model, const HistogramData& hist
         double binWidth = BinWidthAt(histogram, pivot);
         int baseId = 500 + static_cast<int>(i) * 10;
 
-        // The level handle, at the pivot: drag vertically.
-        double levelX = pivot;
-        double levelY = background.amplitude.value * binWidth;
+        // The level handle, anchored where the shape is at its reference
+        // value (= 1) so it stays on the curve: a gaussian background's mean,
+        // a step's low-energy plateau, otherwise the pivot. It is drawn at
+        // the actual curve value, so it can't detach as the shape changes.
+        double anchorX = pivot;
+        if (background.shape == ShapeKind::Gaussian)
+        {
+            if (FitParameter* mean = MeanParameter(background))
+            {
+                anchorX = mean->value;
+            }
+        }
+        else if (background.shape == ShapeKind::Step)
+        {
+            // On the plateau, but inset from range.min so the handle does not
+            // land on the left fit-range line and steal its drag.
+            anchorX = model.range.min + 0.10 * (model.range.max - model.range.min);
+        }
+        anchorX = std::clamp(anchorX, model.range.min, model.range.max);
+
+        double anchorBinWidth = BinWidthAt(histogram, anchorX);
+        double levelX = anchorX;
+        double levelY = ComponentDensity(background, model.range, anchorX) * anchorBinWidth;
         if (ImPlot::DragPoint(baseId, &levelX, &levelY, color, 5.0f))
         {
-            if (levelY > 0.0)
+            double shapeHere = ShapeValue(background, model.range, anchorX);
+            if (levelY > 0.0 && shapeHere > 1e-6)
             {
-                background.amplitude.value = levelY / binWidth;
+                background.amplitude.value = levelY / (anchorBinWidth * shapeHere);
             }
         }
 
