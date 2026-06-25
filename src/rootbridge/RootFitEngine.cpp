@@ -195,11 +195,13 @@ ROOT::Fit::DataOptions MakeDataOptions(const FitModel& model, bool poisson)
 // Re-fits the same data through ROOT's TF1NormSum, whose coefficients are
 // the components' in-range integrals, and compares against our counts.
 // An independent path to the same numbers: if the two disagree, something
-// is wrong and the user must know.
+// is wrong and the user must know. With MINOS it doubles as the source of
+// the asymmetric count errors -- the coefficients ARE the counts, so their
+// profiled errors are written back onto the result's per-component counts.
 CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
                                 const ROOT::Fit::BinData& binData, const FitModel& model,
                                 const std::vector<ComponentSlot>& slots, const FitRange& range,
-                                bool poisson, const FitResult& ours)
+                                bool poisson, FitResult& result)
 {
     CrossCheck check;
 
@@ -222,15 +224,16 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
     double pivot = RangePivot(range);
     int componentCount = static_cast<int>(slots.size());
 
-    // Our fitted counts and parameters per component, in model order.
+    // Our fitted counts and parameters per component, in model order. The
+    // pointers are non-const so MINOS count errors can be written back.
     std::vector<ValueWithError> ourCounts;
-    std::vector<const ComponentResult*> ourComponents;
-    for (const ComponentResult& peak : ours.peaks)
+    std::vector<ComponentResult*> ourComponents;
+    for (ComponentResult& peak : result.peaks)
     {
         ourCounts.push_back(peak.counts);
         ourComponents.push_back(&peak);
     }
-    for (const ComponentResult& background : ours.background)
+    for (ComponentResult& background : result.background)
     {
         ourCounts.push_back(background.counts);
         ourComponents.push_back(&background);
@@ -273,6 +276,11 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
     ROOT::Math::WrappedMultiTF1 wrapped(combined, 1);
     ROOT::Fit::Fitter fitter;
     ApplyMinimizerConfig(fitter, model);
+    // The coefficients are the counts, so MINOS here profiles the counts.
+    if (model.uncertainties == FitUncertainties::Minos)
+    {
+        fitter.Config().SetMinosErrors(true);
+    }
     fitter.SetFunction(wrapped, false);
 
     // Mirror the model's constraints on the shape parameters, so a fit
@@ -328,6 +336,22 @@ CrossCheck RunNormSumCrossCheck(const HistogramData& data, const TH1D& rootData,
         if (scale > 0.0)
         {
             worstDeviation = std::max(worstDeviation, valueDeviation / scale);
+        }
+    }
+
+    // When MINOS ran and the two fits agree, the coefficients' profiled
+    // errors are the asymmetric count errors -- write them onto the counts.
+    // The value stays from our fit (the two agree), so value and error are
+    // consistent. The total is a derived sum, so it stays symmetric.
+    if (model.uncertainties == FitUncertainties::Minos && check.agreed)
+    {
+        for (int i = 0; i < componentCount; ++i)
+        {
+            if (fit.HasMinosError(i))
+            {
+                ourComponents[i]->counts.errorLow = std::abs(fit.LowerError(i)) / binWidth;
+                ourComponents[i]->counts.errorHigh = std::abs(fit.UpperError(i)) / binWidth;
+            }
         }
     }
 

@@ -88,14 +88,28 @@ ResultsAction ResultsPanel::Draw(const FitResult* result, const HistogramData* h
                                             : "Poisson likelihood";
                 ImGui::TextDisabled("Minuit2 \xc2\xb7 %s \xc2\xb7 %s", algorithm, statistic);
 
-                // With MINOS, the parameters carry asymmetric errors but the
-                // counts stay symmetric -- say so, so the table isn't misread.
+                // With MINOS the counts normally become asymmetric too (via
+                // the verification fit). Only when that did not happen -- the
+                // cross-check was skipped or disagreed -- do we note that the
+                // counts fell back to the symmetric error.
                 if (model->uncertainties == FitUncertainties::Minos)
                 {
-                    ImGui::PushStyleColor(ImGuiCol_Text, theme.textDisabled);
-                    ImGui::TextWrapped("Parameter errors are MINOS (asymmetric); counts use the "
-                                       "symmetric (parabolic) error.");
-                    ImGui::PopStyleColor();
+                    bool asymmetricCounts = false;
+                    for (const ComponentResult& peak : result->peaks)
+                    {
+                        asymmetricCounts |= peak.counts.asymmetric();
+                    }
+                    for (const ComponentResult& background : result->background)
+                    {
+                        asymmetricCounts |= background.counts.asymmetric();
+                    }
+                    if (!asymmetricCounts)
+                    {
+                        ImGui::PushStyleColor(ImGuiCol_Text, theme.textDisabled);
+                        ImGui::TextWrapped("Counts use the symmetric error; the verification fit "
+                                           "did not provide MINOS counts.");
+                        ImGui::PopStyleColor();
+                    }
                 }
             }
             ImGui::Separator();

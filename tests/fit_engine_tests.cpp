@@ -502,7 +502,7 @@ TEST_CASE("ignoring bin errors still produces a sensible fit")
           < 6.0 * result.peaks[0].counts.error);
 }
 
-TEST_CASE("MINOS gives asymmetric parameter errors while counts stay symmetric")
+TEST_CASE("MINOS gives asymmetric parameter and count errors")
 {
     RootFitEngine engine;
     HistogramData data = GenerateToy(3);
@@ -512,6 +512,7 @@ TEST_CASE("MINOS gives asymmetric parameter errors while counts stay symmetric")
     REQUIRE(parabolicResult.converged);
     // Parabolic mode leaves the asymmetric errors unset.
     CHECK(!parabolicResult.peaks[0].amplitude.asymmetric());
+    CHECK(!parabolicResult.peaks[0].counts.asymmetric());
 
     FitModel minos = MakeToyModel();
     minos.uncertainties = FitUncertainties::Minos;
@@ -526,11 +527,19 @@ TEST_CASE("MINOS gives asymmetric parameter errors while counts stay symmetric")
     CHECK(amplitude.errorHigh.value() > 0.0);
     CHECK(amplitude.errorHigh.value() == doctest::Approx(amplitude.error).epsilon(0.5));
 
-    const ValueWithError& mean = minosResult.peaks[0].parameters[0];
-    CHECK(mean.asymmetric());
+    CHECK(minosResult.peaks[0].parameters[0].asymmetric()); // mean
 
-    // Counts deliberately stay symmetric (covariance-propagated) in this pass.
-    CHECK(!minosResult.peaks[0].counts.asymmetric());
+    // The counts become asymmetric via the TF1NormSum cross-check (its
+    // coefficients are the counts), once the two fits agree.
+    REQUIRE(minosResult.normSumCheck.agreed);
+    const ValueWithError& counts = minosResult.peaks[0].counts;
+    REQUIRE(counts.asymmetric());
+    CHECK(counts.errorLow.value() > 0.0);
+    CHECK(counts.errorHigh.value() > 0.0);
+    CHECK(counts.errorHigh.value() == doctest::Approx(counts.error).epsilon(0.5));
+
+    // The total is a derived sum, not a fit parameter, so it stays symmetric.
+    CHECK(!minosResult.totalCounts.asymmetric());
 }
 
 TEST_CASE("bad custom formulas and empty models fail gracefully")
