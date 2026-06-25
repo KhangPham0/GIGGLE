@@ -1,15 +1,23 @@
 #ifndef GIGGLE_CORE_FIT_RESULT_H
 #define GIGGLE_CORE_FIT_RESULT_H
 
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace giggle {
 
+// A fitted quantity. `error` is the symmetric (parabolic/HESSE) uncertainty,
+// always present. When MINOS is used, errorLow/errorHigh carry the
+// asymmetric magnitudes (the value is then value +errorHigh / -errorLow).
 struct ValueWithError
 {
     double value = 0.0;
     double error = 0.0;
+    std::optional<double> errorLow;
+    std::optional<double> errorHigh;
+
+    bool asymmetric() const { return errorLow.has_value() && errorHigh.has_value(); }
 };
 
 // The fitted state of one component. Parameters are in the same order as in

@@ -63,6 +63,7 @@ static FitModel MakeRichModel()
 
     // Non-default fit settings, so the round-trip exercises every field.
     model.algorithm = MinimizerAlgorithm::Simplex;
+    model.uncertainties = FitUncertainties::Minos;
     model.integrateBins = true;
     model.ignoreBinErrors = true;
     model.countEmptyBins = true;
@@ -360,6 +361,7 @@ TEST_CASE("FitModel survives a JSON round-trip unchanged")
     CHECK(restored.background[1].formula == "1.0/(1.0+exp((x-[0])/[1]))");
 
     CHECK(restored.algorithm == MinimizerAlgorithm::Simplex);
+    CHECK(restored.uncertainties == FitUncertainties::Minos);
     CHECK(restored.integrateBins);
     CHECK(restored.ignoreBinErrors);
     CHECK(restored.countEmptyBins);
@@ -376,6 +378,7 @@ TEST_CASE("a preset without a settings block loads with default fit settings")
 
     FitModel model = FitModelFromJson(json);
     CHECK(model.algorithm == MinimizerAlgorithm::Migrad);
+    CHECK(model.uncertainties == FitUncertainties::Parabolic);
     CHECK(!model.integrateBins);
     CHECK(!model.ignoreBinErrors);
     CHECK(!model.countEmptyBins);
@@ -420,6 +423,10 @@ TEST_CASE("results documents carry schema version, provenance, and named paramet
     result.totalCounts = { 2658.0, 68.0 };
     result.covariance = { { 625.0, 1.0 }, { 1.0, 0.01 } };
 
+    // An asymmetric (MINOS) error on one parameter, to exercise that path.
+    result.peaks[0].amplitude.errorLow = 2.9;
+    result.peaks[0].amplitude.errorHigh = 3.3;
+
     Provenance provenance = MakeProvenance("run52.root", "spectra/h_ex");
     Json document = MakeResultsDocument(provenance, model, result);
 
@@ -437,6 +444,11 @@ TEST_CASE("results documents carry schema version, provenance, and named paramet
     CHECK(document.at("result").at("background")[1].at("parameters")[1].at("name") == "width");
     CHECK(document.at("result").at("total_counts_in_range").at("value") == 2658.0);
     CHECK(document.at("result").at("covariance")[0][0] == 625.0);
+
+    // Asymmetric errors appear only where set; symmetric ones omit them.
+    CHECK(document.at("result").at("peaks")[0].at("amplitude").at("error_low") == 2.9);
+    CHECK(document.at("result").at("peaks")[0].at("amplitude").at("error_high") == 3.3);
+    CHECK(!document.at("result").at("peaks")[0].at("counts_in_range").contains("error_low"));
 }
 
 TEST_CASE("centroid and FWHM derive from the fitted parameters")

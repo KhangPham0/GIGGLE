@@ -112,7 +112,13 @@ Json ProvenanceToJson(const Provenance& provenance)
 
 Json ValueWithErrorToJson(const ValueWithError& quantity)
 {
-    return { { "value", quantity.value }, { "error", quantity.error } };
+    Json json = { { "value", quantity.value }, { "error", quantity.error } };
+    if (quantity.asymmetric())
+    {
+        json["error_low"] = quantity.errorLow.value();
+        json["error_high"] = quantity.errorHigh.value();
+    }
+    return json;
 }
 
 // Joins fitted values with their parameter names from the model component.
@@ -173,6 +179,7 @@ Json ToJson(const FitModel& model)
     // result), so it deliberately stays out of the saved recipe.
     json["settings"] = {
         { "algorithm", MinimizerAlgorithmName(model.algorithm) },
+        { "uncertainties", FitUncertaintiesName(model.uncertainties) },
         { "integrate_bins", model.integrateBins },
         { "ignore_bin_errors", model.ignoreBinErrors },
         { "count_empty_bins", model.countEmptyBins },
@@ -222,6 +229,15 @@ FitModel FitModelFromJson(const Json& json)
             if (algorithm.has_value())
             {
                 model.algorithm = algorithm.value();
+            }
+        }
+        if (settings.contains("uncertainties"))
+        {
+            std::optional<FitUncertainties> uncertainties =
+                FitUncertaintiesFromName(settings.at("uncertainties").get<std::string>());
+            if (uncertainties.has_value())
+            {
+                model.uncertainties = uncertainties.value();
             }
         }
         if (settings.contains("integrate_bins"))

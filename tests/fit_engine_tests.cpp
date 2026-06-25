@@ -502,6 +502,37 @@ TEST_CASE("ignoring bin errors still produces a sensible fit")
           < 6.0 * result.peaks[0].counts.error);
 }
 
+TEST_CASE("MINOS gives asymmetric parameter errors while counts stay symmetric")
+{
+    RootFitEngine engine;
+    HistogramData data = GenerateToy(3);
+
+    FitModel parabolic = MakeToyModel();
+    FitResult parabolicResult = engine.Fit(data, parabolic);
+    REQUIRE(parabolicResult.converged);
+    // Parabolic mode leaves the asymmetric errors unset.
+    CHECK(!parabolicResult.peaks[0].amplitude.asymmetric());
+
+    FitModel minos = MakeToyModel();
+    minos.uncertainties = FitUncertainties::Minos;
+    FitResult minosResult = engine.Fit(data, minos);
+    REQUIRE(minosResult.converged);
+
+    // Free parameters carry both MINOS magnitudes, and for a well-behaved
+    // Gaussian they sit close to the symmetric HESSE error.
+    const ValueWithError& amplitude = minosResult.peaks[0].amplitude;
+    REQUIRE(amplitude.asymmetric());
+    CHECK(amplitude.errorLow.value() > 0.0);
+    CHECK(amplitude.errorHigh.value() > 0.0);
+    CHECK(amplitude.errorHigh.value() == doctest::Approx(amplitude.error).epsilon(0.5));
+
+    const ValueWithError& mean = minosResult.peaks[0].parameters[0];
+    CHECK(mean.asymmetric());
+
+    // Counts deliberately stay symmetric (covariance-propagated) in this pass.
+    CHECK(!minosResult.peaks[0].counts.asymmetric());
+}
+
 TEST_CASE("bad custom formulas and empty models fail gracefully")
 {
     RootFitEngine engine;

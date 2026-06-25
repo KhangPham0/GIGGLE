@@ -79,6 +79,14 @@ enum class PrintLevel
     Verbose,
 };
 
+// How parameter uncertainties are computed. Parabolic is the fast HESSE
+// error; MINOS profiles each parameter for asymmetric errors.
+enum class FitUncertainties
+{
+    Parabolic,
+    Minos,
+};
+
 struct FitRange
 {
     double min = 0.0;
@@ -98,6 +106,7 @@ struct FitModel
     // How the fit is run. All of these shape the result and travel with a
     // preset, except printLevel, which is session-only terminal verbosity.
     MinimizerAlgorithm algorithm = MinimizerAlgorithm::Migrad;
+    FitUncertainties uncertainties = FitUncertainties::Parabolic;
     bool integrateBins = false;   // compare a bin to the function's integral,
                                   // not its value at the bin center
     bool ignoreBinErrors = false; // treat every bin as weight 1 (unweighted)
@@ -123,6 +132,9 @@ std::optional<FitStatistic> FitStatisticFromName(const std::string& name);
 
 const char* MinimizerAlgorithmName(MinimizerAlgorithm algorithm);
 std::optional<MinimizerAlgorithm> MinimizerAlgorithmFromName(const std::string& name);
+
+const char* FitUncertaintiesName(FitUncertainties uncertainties);
+std::optional<FitUncertainties> FitUncertaintiesFromName(const std::string& name);
 
 // "Peak <n>" with n above every number already used by the given peaks.
 std::string NextPeakLabel(const std::vector<FitComponent>& peaks);

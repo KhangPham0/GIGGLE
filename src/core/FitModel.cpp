@@ -125,6 +125,29 @@ std::optional<MinimizerAlgorithm> MinimizerAlgorithmFromName(const std::string& 
     return std::nullopt;
 }
 
+const char* FitUncertaintiesName(FitUncertainties uncertainties)
+{
+    switch (uncertainties)
+    {
+        case FitUncertainties::Parabolic: return "parabolic";
+        case FitUncertainties::Minos:     return "minos";
+    }
+    return "unknown";
+}
+
+std::optional<FitUncertainties> FitUncertaintiesFromName(const std::string& name)
+{
+    if (name == "parabolic")
+    {
+        return FitUncertainties::Parabolic;
+    }
+    if (name == "minos")
+    {
+        return FitUncertainties::Minos;
+    }
+    return std::nullopt;
+}
+
 std::string NextPeakLabel(const std::vector<FitComponent>& peaks)
 {
     int highest = 0;

@@ -425,15 +425,30 @@ std::vector<std::string> CollectWarnings(const FitModel& fitted, const FitResult
     return warnings;
 }
 
-ComponentResult ReadComponentResult(const ROOT::Fit::FitResult& fit, const ComponentSlot& slot)
+// One fitted parameter, with the symmetric (HESSE) error always and the
+// asymmetric MINOS magnitudes when they were computed and exist for it.
+ValueWithError MakeValue(const ROOT::Fit::FitResult& fit, int index, bool minos)
+{
+    ValueWithError value;
+    value.value = fit.Parameter(index);
+    value.error = fit.ParError(index);
+    if (minos && fit.HasMinosError(index))
+    {
+        value.errorLow = std::abs(fit.LowerError(index));
+        value.errorHigh = std::abs(fit.UpperError(index));
+    }
+    return value;
+}
+
+ComponentResult ReadComponentResult(const ROOT::Fit::FitResult& fit, const ComponentSlot& slot,
+                                    bool minos)
 {
     ComponentResult result;
     result.label = slot.component->label;
-    result.amplitude = { fit.Parameter(slot.amplitudeIndex), fit.ParError(slot.amplitudeIndex) };
+    result.amplitude = MakeValue(fit, slot.amplitudeIndex, minos);
     for (int i = 0; i < slot.shapeCount; ++i)
     {
-        int index = slot.firstShapeIndex + i;
-        result.parameters.push_back({ fit.Parameter(index), fit.ParError(index) });
+        result.parameters.push_back(MakeValue(fit, slot.firstShapeIndex + i, minos));
     }
     return result;
 }
@@ -559,6 +574,11 @@ FitResult RootFitEngine::Fit(const HistogramData& histogram, const FitModel& mod
         ROOT::Math::WrappedMultiTF1 wrappedFunction(function, 1);
         ROOT::Fit::Fitter fitter;
         ApplyMinimizerConfig(fitter, model);
+        // MINOS runs as part of the fit, giving asymmetric parameter errors.
+        if (model.uncertainties == FitUncertainties::Minos)
+        {
+            fitter.Config().SetMinosErrors(true);
+        }
         fitter.SetFunction(wrappedFunction, false);
 
         for (const ComponentSlot& slot : slots)
@@ -603,9 +623,10 @@ FitResult RootFitEngine::Fit(const HistogramData& histogram, const FitModel& mod
         FitModel fitted = model;
         fitted.range = range;
 
+        bool minos = model.uncertainties == FitUncertainties::Minos;
         for (size_t i = 0; i < slots.size(); ++i)
         {
-            ComponentResult componentResult = ReadComponentResult(fit, slots[i]);
+            ComponentResult componentResult = ReadComponentResult(fit, slots[i], minos);
             if (i < model.peaks.size())
             {
                 result.peaks.push_back(componentResult);
