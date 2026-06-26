@@ -283,17 +283,25 @@ void DrawBoundField(const char* label, std::optional<double>& bound, double scal
 // to display units (the bin width for amplitudes, 1 otherwise).
 void DrawBoundsPopup(FitParameter& parameter, double scale)
 {
-    if (ImGui::IsItemHovered() && (parameter.lowerBound.has_value() || parameter.upperBound.has_value()))
+    if (ImGui::IsItemHovered())
     {
-        char text[96];
-        std::snprintf(text, sizeof(text), "bounds: %s%.6g, %.6g%s",
-                      parameter.lowerBound.has_value() ? "[" : "(",
-                      parameter.lowerBound.has_value() ? parameter.lowerBound.value() * scale
-                                                       : -INFINITY,
-                      parameter.upperBound.has_value() ? parameter.upperBound.value() * scale
-                                                       : INFINITY,
-                      parameter.upperBound.has_value() ? "]" : ")");
-        ImGui::SetTooltip("%s", text);
+        if (parameter.lowerBound.has_value() || parameter.upperBound.has_value())
+        {
+            char text[96];
+            std::snprintf(text, sizeof(text), "bounds: %s%.6g, %.6g%s",
+                          parameter.lowerBound.has_value() ? "[" : "(",
+                          parameter.lowerBound.has_value() ? parameter.lowerBound.value() * scale
+                                                           : -INFINITY,
+                          parameter.upperBound.has_value() ? parameter.upperBound.value() * scale
+                                                           : INFINITY,
+                          parameter.upperBound.has_value() ? "]" : ")");
+            ImGui::SetTooltip("%s", text);
+        }
+        else
+        {
+            // The hint, where you'd actually use it, instead of a panel line.
+            ImGui::SetTooltip("right-click to set bounds");
+        }
     }
 
     if (ImGui::BeginPopupContextItem("bounds"))
@@ -372,11 +380,6 @@ FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogr
         }
         else
         {
-            // An upfront tip for the value fields below, rather than a line
-            // stranded down by the action buttons.
-            ImGui::TextDisabled("right-click a value to set bounds");
-            ImGui::Spacing();
-
             DrawRangeSection(model, *histogram, theme, monoFont);
             DrawPeaksSection(model, *histogram, monoFont, theme, validator);
             DrawBackgroundSection(model, *histogram, monoFont, theme, validator);
