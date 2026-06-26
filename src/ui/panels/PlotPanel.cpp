@@ -383,13 +383,19 @@ void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram,
         int baseId = 100 + static_cast<int>(i) * 10;
 
         // The apex: drag horizontally to move the mean, vertically to set
-        // the height.
+        // the height. Hold Shift to vary only the height, keeping the
+        // centroid (a transient lock that does not fix it for the fit).
+        // Parameters fixed in the panel are never moved by dragging.
         double apexX = mean->value;
         double apexY = peak.amplitude.value * binWidth;
         if (ImPlot::DragPoint(baseId, &apexX, &apexY, color, 6.0f))
         {
-            mean->value = apexX;
-            if (apexY > 0.0)
+            bool lockMean = mean->fixed || ImGui::GetIO().KeyShift;
+            if (!lockMean)
+            {
+                mean->value = apexX;
+            }
+            if (!peak.amplitude.fixed && apexY > 0.0)
             {
                 peak.amplitude.value = apexY / binWidth;
             }
@@ -407,6 +413,16 @@ void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram,
         {
             double halfY = 0.5 * peak.amplitude.value * binWidth;
 
+            // A fixed width parameter is not moved by dragging the half-max
+            // handles (the apex still moves the mean/height as usual). The
+            // voigt handle scales sigma and gamma together, so fixing either
+            // one disables it.
+            bool widthFixed = peak.parameters.size() > 1 && peak.parameters[1].fixed;
+            if (peak.shape == ShapeKind::Voigt && peak.parameters.size() > 2)
+            {
+                widthFixed = widthFixed || peak.parameters[2].fixed;
+            }
+
             auto scaleSigma = [&peak](double factor) {
                 if (peak.parameters.size() > 1 && factor > 0.0)
                 {
@@ -416,7 +432,7 @@ void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram,
 
             double leftX = mean->value - leftWidth;
             double leftY = halfY;
-            if (ImPlot::DragPoint(baseId + 1, &leftX, &leftY, color, 4.0f))
+            if (ImPlot::DragPoint(baseId + 1, &leftX, &leftY, color, 4.0f) && !widthFixed)
             {
                 double dragged = std::abs(mean->value - leftX);
                 if (asymmetric)
@@ -431,7 +447,7 @@ void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram,
 
             double rightX = mean->value + rightWidth;
             double rightY = halfY;
-            if (ImPlot::DragPoint(baseId + 2, &rightX, &rightY, color, 4.0f))
+            if (ImPlot::DragPoint(baseId + 2, &rightX, &rightY, color, 4.0f) && !widthFixed)
             {
                 double dragged = std::abs(rightX - mean->value);
                 if (asymmetric)
@@ -486,7 +502,7 @@ void PlotPanel::DrawBackgroundHandles(FitModel& model, const HistogramData& hist
         double anchorBinWidth = BinWidthAt(histogram, anchorX);
         double levelX = anchorX;
         double levelY = ComponentDensity(background, model.range, anchorX) * anchorBinWidth;
-        if (ImPlot::DragPoint(baseId, &levelX, &levelY, color, 5.0f))
+        if (ImPlot::DragPoint(baseId, &levelX, &levelY, color, 5.0f) && !background.amplitude.fixed)
         {
             double shapeHere = ShapeValue(background, model.range, anchorX);
             if (levelY > 0.0 && shapeHere > 1e-6)
@@ -506,7 +522,7 @@ void PlotPanel::DrawBackgroundHandles(FitModel& model, const HistogramData& hist
         double offset = 0.3 * (model.range.max - model.range.min);
         double tiltX = pivot + offset;
         double tiltY = ComponentDensity(background, model.range, tiltX) * binWidth;
-        if (ImPlot::DragPoint(baseId + 1, &tiltX, &tiltY, color, 4.0f))
+        if (ImPlot::DragPoint(baseId + 1, &tiltX, &tiltY, color, 4.0f) && !slope.fixed)
         {
             double level = background.amplitude.value;
             if (level > 0.0 && tiltY > 0.0)
@@ -616,6 +632,7 @@ void PlotPanel::DrawContextMenu(FitModel& model, const HistogramData& histogram,
     ImGui::TextDisabled("right-drag: box zoom (Shift: x only)");
     ImGui::TextDisabled("scroll: zoom   double-click: autoscale");
     ImGui::TextDisabled("hold P + click: add peak");
+    ImGui::TextDisabled("Shift-drag a peak: change height only");
 
     ImGui::EndPopup();
 }

@@ -338,6 +338,24 @@ void HelpMarker(const char* text)
     }
 }
 
+// A small dimmed lock after a fixed parameter's label, so a glance shows
+// which values are held. The value field stays editable -- fixing only
+// disables the fit and the on-plot handle, not typing here.
+void FixedLockGlyph(bool fixed)
+{
+    if (!fixed)
+    {
+        return;
+    }
+    ImGui::SameLine(0.0f, 6.0f);
+    ImGui::TextDisabled(ICON_FA_LOCK);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Fixed: held in the fit and not draggable.\n"
+                          "You can still set its value here.");
+    }
+}
+
 } // namespace
 
 FitPanelAction FitModelPanel::Draw(FitModel& model, const HistogramData* histogram,
@@ -747,6 +765,7 @@ void FitModelPanel::DrawAmplitudeRow(FitComponent& component, const HistogramDat
     {
         ImGui::SetTooltip("In counts, as read off the plot.");
     }
+    FixedLockGlyph(component.amplitude.fixed);
 
     bool bounded = component.amplitude.lowerBound.has_value()
                    || component.amplitude.upperBound.has_value();
@@ -788,6 +807,7 @@ bool FitModelPanel::DrawParameterRow(FitParameter& parameter, const char* id, Im
 
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(id);
+    FixedLockGlyph(parameter.fixed);
 
     // Right-align the fix checkbox; the value field takes the middle.
     float checkboxWidth = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x;
