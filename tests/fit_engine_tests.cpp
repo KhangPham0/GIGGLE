@@ -863,6 +863,19 @@ TEST_CASE("the formula validator rejects scales and accepts honest shapes")
     CHECK(!ValidateFormula("0*x").valid); // identically zero
 }
 
+TEST_CASE("an empty or invalid custom formula evaluates to zero on every call")
+{
+    // Regression: an invalid formula was cached and then returned for
+    // evaluation, so TFormula::Eval spammed "not ready to execute" every
+    // frame. Repeated calls (the cache-hit path) must still yield 0.
+    double p[1] = { 1.0 };
+    CHECK(EvaluateFormulaRaw("", p, 0, 1.0) == 0.0);
+    CHECK(EvaluateFormulaRaw("", p, 0, 2.0) == 0.0);
+    CHECK(EvaluateFormulaRaw("garbage_func(x)", p, 1, 1.0) == 0.0);
+    CHECK(EvaluateFormulaRaw("garbage_func(x)", p, 1, 1.0) == 0.0); // cached invalid
+    CHECK(EvaluateFormulaRaw("exp((x)", p, 0, 1.0) == 0.0);         // unbalanced
+}
+
 TEST_CASE("voigt peaks and custom backgrounds fit end to end")
 {
     InstallCustomShapeEvaluator();

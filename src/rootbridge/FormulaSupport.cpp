@@ -52,7 +52,7 @@ bool BracketsBalanced(const std::string& formula)
 
 TFormula* GetOrBuildFormula(const std::string& formula)
 {
-    if (!BracketsBalanced(formula))
+    if (formula.empty() || !BracketsBalanced(formula))
     {
         return nullptr;
     }
@@ -60,7 +60,11 @@ TFormula* GetOrBuildFormula(const std::string& formula)
     auto existing = FormulaCache().find(formula);
     if (existing != FormulaCache().end())
     {
-        return existing->second.get();
+        // An invalid formula is cached too (so it is not rebuilt every
+        // frame), but it must never be returned for evaluation -- calling
+        // Eval on it spams "formula not ready to execute".
+        TFormula* cached = existing->second.get();
+        return (cached != nullptr && cached->IsValid()) ? cached : nullptr;
     }
 
     auto built = std::make_unique<TFormula>("giggle_custom", formula.c_str(), false);
