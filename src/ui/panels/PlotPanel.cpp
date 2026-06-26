@@ -478,6 +478,169 @@ void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram,
     }
 }
 
+// Two control points near the fit-range edges (plus a middle point for the
+// quadratic). Dragging one re-solves the curve so it passes through it,
+// which sets amplitude/slope (and curvature) together -- lining up the
+// edges is far easier than dialing a level and then a slope.
+void PlotPanel::DrawBackgroundCurvePoints(FitComponent& background, const FitRange& range,
+                                          const HistogramData& histogram, const ImVec4& color,
+                                          int baseId)
+{
+    double pivot = RangePivot(range);
+    double span = range.max - range.min;
+    // The quadratic's edge points sit closer to the fit-range edges (its
+    // endpoints carry more of the shape), still inset enough to clear the
+    // fit-range lines.
+    double inset = (background.shape == ShapeKind::Quadratic ? 0.05 : 0.15) * span;
+    double xL = range.min + inset;
+    double xR = range.max - inset;
+
+    auto densityAt = [&](double x) { return ComponentDensity(background, range, x); };
+
+    // Draws a point on the curve at x; on a drag, reports the target density.
+    auto point = [&](int id, double x, double& draggedDensity) -> bool {
+        double bw = BinWidthAt(histogram, x);
+        double px = x;
+        double py = densityAt(x) * bw;
+        if (ImPlot::DragPoint(id, &px, &py, color, 5.0f))
+        {
+            draggedDensity = py / bw;
+            return true;
+        }
+        return false;
+    };
+
+    bool ampFixed = background.amplitude.fixed;
+    bool slopeFixed = !background.parameters.empty() && background.parameters[0].fixed;
+
+    if (background.shape == ShapeKind::Linear || background.shape == ShapeKind::Exponential)
+    {
+        bool isExp = background.shape == ShapeKind::Exponential;
+
+        // Solve the free parameters so the curve passes through (xDrag, dDrag);
+        // when both are free, the other edge fills the second degree of freedom.
+        auto solve = [&](double xDrag, double dDrag, double xOther, double dOther) {
+            if (isExp && dDrag <= 0.0)
+            {
+                return; // an exponential stays positive
+            }
+            if (!ampFixed && !slopeFixed)
+            {
+                if (isExp)
+                {
+                    if (dOther <= 0.0)
+                    {
+                        return;
+                    }
+                    double slope = std::log(dDrag / dOther) / (xDrag - xOther);
+                    double a = dDrag / std::exp(slope * (xDrag - pivot));
+                    if (a > 1e-12)
+                    {
+                        background.amplitude.value = a;
+                        background.parameters[0].value = slope;
+                    }
+                }
+                else
+                {
+                    double b = (dDrag - dOther) / (xDrag - xOther);
+                    double a = dDrag - b * (xDrag - pivot);
+                    if (a > 1e-12)
+                    {
+                        background.amplitude.value = a;
+                        background.parameters[0].value = b / a;
+                    }
+                }
+            }
+            else if (slopeFixed && !ampFixed)
+            {
+                double slope = background.parameters[0].value;
+                double factor = isExp ? std::exp(slope * (xDrag - pivot))
+                                      : (1.0 + slope * (xDrag - pivot));
+                if (std::abs(factor) > 1e-9 && dDrag / factor > 1e-12)
+                {
+                    background.amplitude.value = dDrag / factor;
+                }
+            }
+            else if (ampFixed && !slopeFixed)
+            {
+                double a = background.amplitude.value;
+                if (a > 1e-12)
+                {
+                    if (isExp && dDrag > 0.0)
+                    {
+                        background.parameters[0].value = std::log(dDrag / a) / (xDrag - pivot);
+                    }
+                    else if (!isExp)
+                    {
+                        background.parameters[0].value = (dDrag / a - 1.0) / (xDrag - pivot);
+                    }
+                }
+            }
+            // both fixed: the points are inert; use the panel.
+        };
+
+        double dDrag = 0.0;
+        if (point(baseId, xL, dDrag))
+        {
+            solve(xL, dDrag, xR, densityAt(xR));
+        }
+        if (point(baseId + 1, xR, dDrag))
+        {
+            solve(xR, dDrag, xL, densityAt(xL));
+        }
+        return;
+    }
+
+    if (background.shape == ShapeKind::Quadratic)
+    {
+        bool curvFixed = background.parameters.size() > 1 && background.parameters[1].fixed;
+        bool anyFixed = ampFixed || slopeFixed || curvFixed;
+        double xM = pivot;
+        double uL = xL - pivot;
+        double uR = xR - pivot;
+
+        // The parabola through the dragged point and the other two current
+        // points. The middle sits at the pivot (u = 0), so it is the center
+        // value (= amplitude); the edges then fix the slope and curvature.
+        auto solveQuad = [&](int dragged, double draggedDensity) {
+            if (anyFixed || background.parameters.size() < 2)
+            {
+                return; // fixed quadratic params: use the panel (rare)
+            }
+            double dL = dragged == 0 ? draggedDensity : densityAt(xL);
+            double dM = dragged == 1 ? draggedDensity : densityAt(xM);
+            double dR = dragged == 2 ? draggedDensity : densityAt(xR);
+            double det = uL * uR * uR - uR * uL * uL;
+            if (std::abs(det) < 1e-12 || dM <= 1e-12)
+            {
+                return;
+            }
+            double a = dM;
+            double rL = dL - a;
+            double rR = dR - a;
+            double b = (rL * uR * uR - rR * uL * uL) / det;
+            double c = (uL * rR - uR * rL) / det;
+            background.amplitude.value = a;
+            background.parameters[0].value = b / a;
+            background.parameters[1].value = c / a;
+        };
+
+        double dDrag = 0.0;
+        if (point(baseId, xL, dDrag))
+        {
+            solveQuad(0, dDrag);
+        }
+        if (point(baseId + 1, xM, dDrag))
+        {
+            solveQuad(1, dDrag);
+        }
+        if (point(baseId + 2, xR, dDrag))
+        {
+            solveQuad(2, dDrag);
+        }
+    }
+}
+
 void PlotPanel::DrawBackgroundHandles(FitModel& model, const HistogramData& histogram,
                                       const Theme& theme)
 {
@@ -499,35 +662,30 @@ void PlotPanel::DrawBackgroundHandles(FitModel& model, const HistogramData& hist
         }
 
         ImVec4 color = theme.ComponentColor(model.peaks.size() + i);
+        int baseId = 500 + static_cast<int>(i) * 10;
 
-        // A gaussian background is a peak, so it gets the peak controls
-        // (apex + width) instead of the level/tilt handles.
+        // A gaussian background is a peak: apex + width handles.
         if (background.shape == ShapeKind::Gaussian)
         {
-            DrawPeakControls(background, model.range, histogram, color,
-                             500 + static_cast<int>(i) * 10);
+            DrawPeakControls(background, model.range, histogram, color, baseId);
             continue;
         }
 
-        double binWidth = BinWidthAt(histogram, pivot);
-        int baseId = 500 + static_cast<int>(i) * 10;
-
-        // The level handle, anchored where the shape is at its reference
-        // value (= 1) so it stays on the curve: a gaussian background's mean,
-        // a step's low-energy plateau, otherwise the pivot. It is drawn at
-        // the actual curve value, so it can't detach as the shape changes.
-        double anchorX = pivot;
-        if (background.shape == ShapeKind::Gaussian)
+        // The curve backgrounds get edge (and middle) points to line up.
+        if (background.shape == ShapeKind::Linear || background.shape == ShapeKind::Quadratic
+            || background.shape == ShapeKind::Exponential)
         {
-            if (FitParameter* mean = MeanParameter(background))
-            {
-                anchorX = mean->value;
-            }
+            DrawBackgroundCurvePoints(background, model.range, histogram, color, baseId);
+            continue;
         }
-        else if (background.shape == ShapeKind::Step)
+
+        // Constant, Step, Custom: a single level handle, anchored where the
+        // shape is 1 so it stays on the curve (the step's plateau, else the
+        // pivot) and drawn at the actual curve value.
+        double anchorX = pivot;
+        if (background.shape == ShapeKind::Step)
         {
-            // On the plateau, but inset from range.min so the handle does not
-            // land on the left fit-range line and steal its drag.
+            // Inset from range.min so it doesn't sit on the left fit-range line.
             anchorX = model.range.min + 0.10 * (model.range.max - model.range.min);
         }
         anchorX = std::clamp(anchorX, model.range.min, model.range.max);
@@ -541,45 +699,6 @@ void PlotPanel::DrawBackgroundHandles(FitModel& model, const HistogramData& hist
             if (levelY > 0.0 && shapeHere > 1e-6)
             {
                 background.amplitude.value = levelY / (anchorBinWidth * shapeHere);
-            }
-        }
-
-        // A second handle right of the pivot tilts the shape, when it has
-        // a slope to tilt.
-        if (background.parameters.empty() || background.parameters[0].name != "slope")
-        {
-            continue;
-        }
-        FitParameter& slope = background.parameters[0];
-
-        double offset = 0.3 * (model.range.max - model.range.min);
-        double tiltX = pivot + offset;
-        double tiltY = ComponentDensity(background, model.range, tiltX) * binWidth;
-        if (ImPlot::DragPoint(baseId + 1, &tiltX, &tiltY, color, 4.0f) && !slope.fixed)
-        {
-            double level = background.amplitude.value;
-            if (level > 0.0 && tiltY > 0.0)
-            {
-                double ratio = tiltY / (binWidth * level);
-                switch (background.shape)
-                {
-                    case ShapeKind::Linear:
-                        slope.value = (ratio - 1.0) / offset;
-                        break;
-                    case ShapeKind::Quadratic:
-                    {
-                        double curvature = background.parameters.size() > 1
-                                               ? background.parameters[1].value
-                                               : 0.0;
-                        slope.value = (ratio - 1.0 - curvature * offset * offset) / offset;
-                        break;
-                    }
-                    case ShapeKind::Exponential:
-                        slope.value = std::log(ratio) / offset;
-                        break;
-                    default:
-                        break;
-                }
             }
         }
     }

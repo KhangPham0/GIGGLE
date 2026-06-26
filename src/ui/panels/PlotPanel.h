@@ -63,6 +63,10 @@ private:
     void DrawPeakControls(FitComponent& component, const FitRange& range,
                           const HistogramData& histogram, const ImVec4& color, int baseId);
     void DrawBackgroundHandles(FitModel& model, const HistogramData& histogram, const Theme& theme);
+    // Edge (and, for the quadratic, middle) control points for the curve
+    // backgrounds: dragging one re-solves the curve through it.
+    void DrawBackgroundCurvePoints(FitComponent& background, const FitRange& range,
+                                   const HistogramData& histogram, const ImVec4& color, int baseId);
     void HandleAddPeakClick(PlotAction& action);
     void DrawContextMenu(FitModel& model, const HistogramData& histogram, bool& showFit,
                          PlotAction& action);
