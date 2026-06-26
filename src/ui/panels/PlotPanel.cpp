@@ -6,6 +6,7 @@
 
 #include "imgui.h"
 #include "implot.h"
+#include "implot_internal.h" // ImPlot::GetItem, to read a legend entry's visibility
 
 #include "core/Shapes.h"
 #include "ui/PlotRendering.h"
@@ -170,6 +171,8 @@ PlotAction PlotPanel::Draw(const HistogramData* histogram, FitModel* model, bool
         {
             ImPlot::SetupAxes(nullptr, "counts");
             ImPlot::SetupAxisScale(ImAxis_Y1, m_logScaleY ? ImPlotScale_Log10 : ImPlotScale_Linear);
+            // Top-right, clear of the Fit tools button in the top-left corner.
+            ImPlot::SetupLegend(ImPlotLocation_NorthEast);
 
             // Bound panning to the data plus a margin, so the view can't
             // drift off into empty space on any side. The y-floor sits at 0
@@ -372,6 +375,14 @@ void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram,
     for (size_t i = 0; i < model.peaks.size(); ++i)
     {
         FitComponent& peak = model.peaks[i];
+        // Skip the handles when the component's curve is toggled off in the
+        // legend -- the controls should follow the curve they belong to.
+        ImPlotItem* curveItem = ImPlot::GetItem(peak.label.c_str());
+        if (curveItem != nullptr && !curveItem->Show)
+        {
+            continue;
+        }
+
         FitParameter* mean = MeanParameter(peak);
         if (mean == nullptr)
         {
@@ -475,6 +486,14 @@ void PlotPanel::DrawBackgroundHandles(FitModel& model, const HistogramData& hist
     for (size_t i = 0; i < model.background.size(); ++i)
     {
         FitComponent& background = model.background[i];
+
+        // Skip the handles when this component's curve is toggled off.
+        ImPlotItem* curveItem = ImPlot::GetItem(background.label.c_str());
+        if (curveItem != nullptr && !curveItem->Show)
+        {
+            continue;
+        }
+
         ImVec4 color = theme.ComponentColor(model.peaks.size() + i);
         double binWidth = BinWidthAt(histogram, pivot);
         int baseId = 500 + static_cast<int>(i) * 10;

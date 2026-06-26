@@ -63,6 +63,7 @@ bool ExportPlotOffscreen(const std::string& path, const PlotExportOptions& optio
                                 ImGuiCond_Always);
         ImPlot::SetupAxisLimits(ImAxis_Y1, options.viewLimits[2], options.viewLimits[3],
                                 ImGuiCond_Always);
+        ImPlot::SetupLegend(ImPlotLocation_NorthEast); // matches the on-screen plot
 
         // A figure shows the data, the fit curves, and thin lines marking
         // the fit range. The heavy range shade and the drag handles are
