@@ -370,107 +370,111 @@ void PlotPanel::DrawModelCurves(const FitModel& model, const HistogramData& hist
     RenderModelCurves(model, histogram, theme);
 }
 
+void PlotPanel::DrawPeakControls(FitComponent& component, const FitRange& range,
+                                 const HistogramData& histogram, const ImVec4& color, int baseId)
+{
+    FitParameter* mean = MeanParameter(component);
+    if (mean == nullptr)
+    {
+        return;
+    }
+
+    double binWidth = BinWidthAt(histogram, mean->value);
+
+    // The apex: drag horizontally to move the mean, vertically to set the
+    // height. Hold Shift to vary only the height, keeping the centroid (a
+    // transient lock that does not fix it for the fit). Parameters fixed in
+    // the panel are never moved by dragging.
+    double apexX = mean->value;
+    double apexY = component.amplitude.value * binWidth;
+    if (ImPlot::DragPoint(baseId, &apexX, &apexY, color, 6.0f))
+    {
+        bool lockMean = mean->fixed || ImGui::GetIO().KeyShift;
+        if (!lockMean)
+        {
+            mean->value = apexX;
+        }
+        if (!component.amplitude.fixed && apexY > 0.0)
+        {
+            component.amplitude.value = apexY / binWidth;
+        }
+    }
+
+    // Two half-maximum handles: drag horizontally to set the width. The
+    // tailed gaussian is asymmetric, so its sides are located numerically and
+    // a drag scales sigma proportionally.
+    bool asymmetric =
+        component.shape == ShapeKind::GaussianTail || component.shape == ShapeKind::Landau;
+    double leftWidth = asymmetric ? NumericHalfWidth(component, range, mean->value, -1.0)
+                                  : HalfWidthAtHalfMax(component);
+    double rightWidth = asymmetric ? NumericHalfWidth(component, range, mean->value, +1.0)
+                                   : leftWidth;
+    if (leftWidth <= 0.0 || rightWidth <= 0.0)
+    {
+        return;
+    }
+    double halfY = 0.5 * component.amplitude.value * binWidth;
+
+    // A fixed width is not moved by the half-max handles. The voigt handle
+    // scales sigma and gamma together, so fixing either one disables it.
+    bool widthFixed = component.parameters.size() > 1 && component.parameters[1].fixed;
+    if (component.shape == ShapeKind::Voigt && component.parameters.size() > 2)
+    {
+        widthFixed = widthFixed || component.parameters[2].fixed;
+    }
+
+    auto scaleSigma = [&component](double factor) {
+        if (component.parameters.size() > 1 && factor > 0.0)
+        {
+            component.parameters[1].value *= factor;
+        }
+    };
+
+    double leftX = mean->value - leftWidth;
+    double leftY = halfY;
+    if (ImPlot::DragPoint(baseId + 1, &leftX, &leftY, color, 4.0f) && !widthFixed)
+    {
+        double dragged = std::abs(mean->value - leftX);
+        if (asymmetric)
+        {
+            scaleSigma(dragged / leftWidth);
+        }
+        else
+        {
+            SetHalfWidthAtHalfMax(component, dragged);
+        }
+    }
+
+    double rightX = mean->value + rightWidth;
+    double rightY = halfY;
+    if (ImPlot::DragPoint(baseId + 2, &rightX, &rightY, color, 4.0f) && !widthFixed)
+    {
+        double dragged = std::abs(rightX - mean->value);
+        if (asymmetric)
+        {
+            scaleSigma(dragged / rightWidth);
+        }
+        else
+        {
+            SetHalfWidthAtHalfMax(component, dragged);
+        }
+    }
+}
+
 void PlotPanel::DrawPeakHandles(FitModel& model, const HistogramData& histogram, const Theme& theme)
 {
     for (size_t i = 0; i < model.peaks.size(); ++i)
     {
         FitComponent& peak = model.peaks[i];
         // Skip the handles when the component's curve is toggled off in the
-        // legend -- the controls should follow the curve they belong to.
+        // legend -- the controls follow the curve they belong to.
         ImPlotItem* curveItem = ImPlot::GetItem(peak.label.c_str());
         if (curveItem != nullptr && !curveItem->Show)
         {
             continue;
         }
-
-        FitParameter* mean = MeanParameter(peak);
-        if (mean == nullptr)
-        {
-            continue;
-        }
-
-        ImVec4 color = theme.ComponentColor(i);
-        double binWidth = BinWidthAt(histogram, mean->value);
-        int baseId = 100 + static_cast<int>(i) * 10;
-
-        // The apex: drag horizontally to move the mean, vertically to set
-        // the height. Hold Shift to vary only the height, keeping the
-        // centroid (a transient lock that does not fix it for the fit).
-        // Parameters fixed in the panel are never moved by dragging.
-        double apexX = mean->value;
-        double apexY = peak.amplitude.value * binWidth;
-        if (ImPlot::DragPoint(baseId, &apexX, &apexY, color, 6.0f))
-        {
-            bool lockMean = mean->fixed || ImGui::GetIO().KeyShift;
-            if (!lockMean)
-            {
-                mean->value = apexX;
-            }
-            if (!peak.amplitude.fixed && apexY > 0.0)
-            {
-                peak.amplitude.value = apexY / binWidth;
-            }
-        }
-
-        // Two half-maximum handles: drag horizontally to set the width.
-        // The tailed gaussian is asymmetric, so its sides are located
-        // numerically and a drag scales sigma proportionally.
-        bool asymmetric = peak.shape == ShapeKind::GaussianTail || peak.shape == ShapeKind::Landau;
-        double leftWidth = asymmetric ? NumericHalfWidth(peak, model.range, mean->value, -1.0)
-                                      : HalfWidthAtHalfMax(peak);
-        double rightWidth = asymmetric ? NumericHalfWidth(peak, model.range, mean->value, +1.0)
-                                       : leftWidth;
-        if (leftWidth > 0.0 && rightWidth > 0.0)
-        {
-            double halfY = 0.5 * peak.amplitude.value * binWidth;
-
-            // A fixed width parameter is not moved by dragging the half-max
-            // handles (the apex still moves the mean/height as usual). The
-            // voigt handle scales sigma and gamma together, so fixing either
-            // one disables it.
-            bool widthFixed = peak.parameters.size() > 1 && peak.parameters[1].fixed;
-            if (peak.shape == ShapeKind::Voigt && peak.parameters.size() > 2)
-            {
-                widthFixed = widthFixed || peak.parameters[2].fixed;
-            }
-
-            auto scaleSigma = [&peak](double factor) {
-                if (peak.parameters.size() > 1 && factor > 0.0)
-                {
-                    peak.parameters[1].value *= factor;
-                }
-            };
-
-            double leftX = mean->value - leftWidth;
-            double leftY = halfY;
-            if (ImPlot::DragPoint(baseId + 1, &leftX, &leftY, color, 4.0f) && !widthFixed)
-            {
-                double dragged = std::abs(mean->value - leftX);
-                if (asymmetric)
-                {
-                    scaleSigma(dragged / leftWidth);
-                }
-                else
-                {
-                    SetHalfWidthAtHalfMax(peak, dragged);
-                }
-            }
-
-            double rightX = mean->value + rightWidth;
-            double rightY = halfY;
-            if (ImPlot::DragPoint(baseId + 2, &rightX, &rightY, color, 4.0f) && !widthFixed)
-            {
-                double dragged = std::abs(rightX - mean->value);
-                if (asymmetric)
-                {
-                    scaleSigma(dragged / rightWidth);
-                }
-                else
-                {
-                    SetHalfWidthAtHalfMax(peak, dragged);
-                }
-            }
-        }
+        DrawPeakControls(peak, model.range, histogram, theme.ComponentColor(i),
+                         100 + static_cast<int>(i) * 10);
     }
 }
 
@@ -495,6 +499,16 @@ void PlotPanel::DrawBackgroundHandles(FitModel& model, const HistogramData& hist
         }
 
         ImVec4 color = theme.ComponentColor(model.peaks.size() + i);
+
+        // A gaussian background is a peak, so it gets the peak controls
+        // (apex + width) instead of the level/tilt handles.
+        if (background.shape == ShapeKind::Gaussian)
+        {
+            DrawPeakControls(background, model.range, histogram, color,
+                             500 + static_cast<int>(i) * 10);
+            continue;
+        }
+
         double binWidth = BinWidthAt(histogram, pivot);
         int baseId = 500 + static_cast<int>(i) * 10;
 

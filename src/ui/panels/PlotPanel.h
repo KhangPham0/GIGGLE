@@ -58,6 +58,10 @@ private:
     void DrawRangeTools(FitModel& model, const HistogramData& histogram, const Theme& theme);
     void DrawModelCurves(const FitModel& model, const HistogramData& histogram, const Theme& theme);
     void DrawPeakHandles(FitModel& model, const HistogramData& histogram, const Theme& theme);
+    // The apex + half-max handles for one peak-like component (a peak, or a
+    // gaussian background). `baseId` must be unique per component.
+    void DrawPeakControls(FitComponent& component, const FitRange& range,
+                          const HistogramData& histogram, const ImVec4& color, int baseId);
     void DrawBackgroundHandles(FitModel& model, const HistogramData& histogram, const Theme& theme);
     void HandleAddPeakClick(PlotAction& action);
     void DrawContextMenu(FitModel& model, const HistogramData& histogram, bool& showFit,
