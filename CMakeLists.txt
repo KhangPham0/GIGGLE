@@ -46,5 +46,9 @@ endif()
 add_subdirectory(vendor)
 add_subdirectory(src)
 
-enable_testing()
-add_subdirectory(tests)
+# The test suite is an internal development aid, not part of the published
+# tree; build it only when tests/ is present.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
+    enable_testing()
+    add_subdirectory(tests)
+endif()
