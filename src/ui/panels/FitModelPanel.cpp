@@ -159,10 +159,8 @@ void ConvertComponentShape(FitComponent& component, ShapeKind to, const FitRange
         {
             parameter.lowerBound = 0.0;
         }
-        if (name == "alpha")
-        {
-            parameter.lowerBound = 0.0; // tail start stays on the low side
-        }
+        // alpha is intentionally left unbounded: its sign chooses the tail side
+        // (low energy for alpha > 0, high for alpha < 0), as in ROOT.
         if (name == "n")
         {
             parameter.lowerBound = 1.0; // power-law exponent above 1

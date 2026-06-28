@@ -126,17 +126,71 @@ TailShapeParts TailParts(const double* p, int count)
     return parts;
 }
 
-// Composite Simpson integration for the shapes without a closed form.
-double SimpsonIntegral(const std::function<double(double)>& f, double a, double b)
+// One recursive step of adaptive Simpson on a panel [a, b]: split it, and keep
+// splitting until the two-panel estimate agrees with the one-panel estimate to
+// the tolerance (or the depth runs out).
+double RefineSimpson(const std::function<double(double)>& f, double a, double b,
+                     double fa, double fm, double fb, double whole, double eps, int depth)
 {
-    const int intervals = 200; // even; smooth integrands converge fast
-    double h = (b - a) / intervals;
-    double sum = f(a) + f(b);
-    for (int i = 1; i < intervals; ++i)
+    double m = 0.5 * (a + b);
+    double fl = f(0.5 * (a + m));
+    double fr = f(0.5 * (m + b));
+    double left = (m - a) / 6.0 * (fa + 4.0 * fl + fm);
+    double right = (b - m) / 6.0 * (fm + 4.0 * fr + fb);
+    double both = left + right;
+    if (depth <= 0 || std::abs(both - whole) <= 15.0 * eps)
     {
-        sum += f(a + i * h) * (i % 2 == 0 ? 2.0 : 4.0);
+        return both + (both - whole) / 15.0; // Richardson extrapolation
     }
-    return sum * h / 3.0;
+    return RefineSimpson(f, a, m, fa, fl, fm, left, 0.5 * eps, depth - 1)
+           + RefineSimpson(f, m, b, fm, fr, fb, right, 0.5 * eps, depth - 1);
+}
+
+// Adaptive Simpson integration for the shapes without a closed form. A fixed
+// grid over the whole range badly under-resolves a sharp peak in a wide window
+// (a narrow line can fall between samples), so the count would be wrong.
+// `featureScale` is the narrowest feature to resolve (a peak's width); it sets a
+// starting grid fine enough that the peak is always sampled, and each starting
+// panel is then refined adaptively. Pass 0 when no scale is known (custom
+// formulas) and a conservative default is used. The count integral runs once,
+// after the fit converges, so the extra evaluations cost nothing in the fit loop.
+double SimpsonIntegral(const std::function<double(double)>& f, double a, double b,
+                       double featureScale = 0.0)
+{
+    if (!(b > a))
+    {
+        return 0.0;
+    }
+    double span = b - a;
+    double scale = featureScale > 0.0 ? featureScale : span / 64.0;
+    int panels = static_cast<int>(std::ceil(span / scale * 4.0));
+    panels = std::max(4, std::min(panels, 8192));
+    double h = span / panels;
+
+    // Sample the starting grid once (panel boundaries and midpoints), take a
+    // coarse estimate to size the tolerance, then refine each panel.
+    std::vector<double> node(panels + 1), mid(panels);
+    for (int i = 0; i <= panels; ++i)
+    {
+        node[i] = f(a + i * h);
+    }
+    double coarse = 0.0;
+    for (int i = 0; i < panels; ++i)
+    {
+        mid[i] = f(a + (i + 0.5) * h);
+        coarse += h / 6.0 * (node[i] + 4.0 * mid[i] + node[i + 1]);
+    }
+    double eps = std::max(std::abs(coarse), 1e-300) * 1e-9;
+
+    double total = 0.0;
+    for (int i = 0; i < panels; ++i)
+    {
+        double x0 = a + i * h;
+        double whole = h / 6.0 * (node[i] + 4.0 * mid[i] + node[i + 1]);
+        total += RefineSimpson(f, x0, x0 + h, node[i], mid[i], node[i + 1], whole,
+                               eps * h / span, 24);
+    }
+    return total;
 }
 
 // The standard Landau density phi(lambda), via the Kolbig-Schorr rational
@@ -213,8 +267,8 @@ double LandauDensity(double v)
 const double kLandauPeakLambda = -0.22278298;
 const double kLandauPeakValue = LandauDensity(kLandauPeakLambda);
 
-// Copies a component's parameter values into a flat array. Implemented
-// shapes have at most 3 parameters.
+// Copies a component's parameter values into a flat array (the caller sizes the
+// buffer; the widest shapes, Crystal Ball and the tailed Gaussian, use four).
 int FlattenParameters(const FitComponent& component, double* buffer, int capacity)
 {
     int count = std::min(static_cast<int>(component.parameters.size()), capacity);
@@ -275,13 +329,20 @@ double ShapeValue(ShapeKind kind, const double* p, int count, double x, double p
             return VoigtShape(x - Param(p, count, 0), Param(p, count, 1, 1.0), Param(p, count, 2));
         case ShapeKind::CrystalBall:
         {
-            // Gaussian core; below t = -alpha it switches to a power-law
-            // tail that joins the core smoothly. The core is 1 at the mean.
+            // Gaussian core; beyond t = -alpha it switches to a power-law tail
+            // that joins the core smoothly. The core is 1 at the mean. The sign
+            // of alpha picks the tail side (low energy for alpha > 0), matching
+            // ROOT's crystalball_function.
             double mean = Param(p, count, 0);
             double sigma = std::max(std::abs(Param(p, count, 1, 1.0)), 1e-12);
-            double alpha = std::max(std::abs(Param(p, count, 2, 1.0)), 1e-6);
+            double alphaRaw = Param(p, count, 2, 1.0);
             double n = std::max(Param(p, count, 3, 2.0), 1.0 + 1e-6);
             double t = (x - mean) / sigma;
+            if (alphaRaw < 0.0)
+            {
+                t = -t; // flip the tail to the high-energy side, as ROOT does
+            }
+            double alpha = std::max(std::abs(alphaRaw), 1e-6);
             if (t > -alpha)
             {
                 return std::exp(-0.5 * t * t);
@@ -371,8 +432,18 @@ double ShapeIntegral(ShapeKind kind, const double* p, int count, double a, doubl
         case ShapeKind::Voigt:
         case ShapeKind::CrystalBall:
         case ShapeKind::Landau:
+        {
+            // Resolve to the peak's width so a sharp line in a wide range is not
+            // missed: sigma (or scale) for all three, widened by gamma for Voigt.
+            double width = std::abs(Param(p, count, 1, 1.0));
+            if (kind == ShapeKind::Voigt)
+            {
+                width = std::max(width, std::abs(Param(p, count, 2, 0.0)));
+            }
             return SimpsonIntegral(
-                [&](double x) { return ShapeValue(kind, p, count, x, pivot); }, a, b);
+                [&](double x) { return ShapeValue(kind, p, count, x, pivot); }, a, b,
+                std::max(width, 1e-9));
+        }
         case ShapeKind::GaussianTail:
         {
             TailShapeParts parts = TailParts(p, count);
