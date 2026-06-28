@@ -30,7 +30,9 @@ if(NOT ROOT_DIR)
         list(APPEND CMAKE_PREFIX_PATH "${ROOT_PREFIX}")
     endif()
 endif()
-find_package(ROOT 6.30 REQUIRED)
+# No version floor is asserted: GIGGLE is developed and tested against one ROOT
+# version (see docs/building.md), and other versions are simply untested.
+find_package(ROOT REQUIRED)
 
 # A ROOT built with a different C++ standard than this project can produce
 # link or runtime errors that are hard to diagnose. Warn early and say how
