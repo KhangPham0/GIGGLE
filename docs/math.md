@@ -20,14 +20,16 @@ The fitted curve is a sum of pieces: one per peak, plus an optional background.
 Each piece is a **shape** (a Gaussian, a sloped line, and so on) times an
 **amplitude** that scales it:
 
-$$ f(x) = \sum_i A_i\,\phi_i(x) . $$
+```math
+f(x) = \sum_i A_i\,\phi_i(x) .
+```
 
 Every shape is normalised to equal 1 at its *reference point*, a peak's mean
 $\mu$ or, for a background, the center of the fit range (the *pivot* $p$), so the
 amplitude $A_i$ is just the curve's height there.
 
 The curve is a density (per unit $x$) while a bin holds counts, so a bin of width
-$\Delta x$ expects $f(x)\,\Delta x$ counts. That one factor lets the panel show a
+$\Delta x$ expects $f(x)\thinspace \Delta x$ counts. That one factor lets the panel show a
 peak's **height in counts** while the fit works in densities; the two differ by a
 constant, so fixing or bounding the height is the same as fixing or bounding the
 amplitude.
@@ -37,11 +39,13 @@ amplitude.
 The headline number for each piece is its **counts in the fit range**: the area
 under its curve between the range edges,
 
-$$ N_i = A_i \int_{x_{\min}}^{x_{\max}} \phi_i(x)\,\mathrm{d}x . $$
+```math
+N_i = A_i \int_{x_{\min}}^{x_{\max}} \phi_i(x)\,\mathrm{d}x .
+```
 
 Note what "normalised to 1" means: $\phi$ equals 1 at its reference point (the
 peak's height, before the amplitude scales it), not unit area. The integral
-$\int \phi\,\mathrm{d}x$ is the area under that unit-height shape, which grows
+$\int \phi\thinspace \mathrm{d}x$ is the area under that unit-height shape, which grows
 with the peak's width (for a Gaussian it is $\sigma\sqrt{2\pi}$, not 1). So the
 count is amplitude times area: a tall narrow peak and a short wide one can hold
 the same number of counts.
@@ -56,7 +60,7 @@ area all use the snapped range.
 
 ## The shape catalogue
 
-Each entry below gives the shape $\phi$, its integral $\int_a^b \phi\,\mathrm{d}x$
+Each entry below gives the shape $\phi$, its integral $\int_a^b \phi\thinspace \mathrm{d}x$
 (which the count uses) when a closed form exists, and the FWHM where the shape
 defines one. Throughout, every $\phi$ is 1 at its reference point; for peaks the
 position is written $u = x - \mu$, and for backgrounds $p$ is the pivot, the
@@ -66,18 +70,24 @@ center of the fit range, $p = (x_{\min} + x_{\max})/2$.
 
 **Gaussian**, with parameters `mean` ($\mu$) and `sigma` ($\sigma$):
 
-$$ \phi(x) = \exp\!\left(-\frac{(x-\mu)^2}{2\sigma^2}\right) $$
+```math
+\phi(x) = \exp\!\left(-\frac{(x-\mu)^2}{2\sigma^2}\right)
+```
 
-$$ \int_a^b \phi\,\mathrm{d}x = \sigma\sqrt{\tfrac{\pi}{2}}
+```math
+\int_a^b \phi\,\mathrm{d}x = \sigma\sqrt{\tfrac{\pi}{2}}
    \left[\mathrm{erf}\frac{b-\mu}{\sigma\sqrt2} - \mathrm{erf}\frac{a-\mu}{\sigma\sqrt2}\right],
-   \qquad \mathrm{FWHM} = 2\sqrt{2\ln 2}\,\sigma \approx 2.3548\,\sigma . $$
+   \qquad \mathrm{FWHM} = 2\sqrt{2\ln 2}\,\sigma \approx 2.3548\,\sigma .
+```
 
 **Lorentzian**, with parameters `mean` ($\mu$) and `gamma` ($\gamma$, the half
 width at half maximum):
 
-$$ \phi(x) = \frac{1}{1 + \big((x-\mu)/\gamma\big)^2}, \qquad
+```math
+\phi(x) = \frac{1}{1 + \big((x-\mu)/\gamma\big)^2}, \qquad
    \int_a^b \phi\,\mathrm{d}x = \gamma\left[\arctan\frac{b-\mu}{\gamma} - \arctan\frac{a-\mu}{\gamma}\right],
-   \qquad \mathrm{FWHM} = 2\gamma . $$
+   \qquad \mathrm{FWHM} = 2\gamma .
+```
 
 **Voigt**, with parameters `mean` ($\mu$), `sigma` ($\sigma$, the Gaussian
 width), and `gamma` ($\gamma$, the Lorentzian HWHM). A Voigt profile is a
@@ -86,18 +96,22 @@ with a Lorentzian; it has no elementary closed form, so GIGGLE writes it through
 the [Faddeeva function](https://en.wikipedia.org/wiki/Faddeeva_function) $w$ and
 normalises by its central value:
 
-$$ \phi(x) = \frac{\mathrm{Re}\,w\!\big((u + i\gamma)/(\sigma\sqrt2)\big)}
-                  {\mathrm{Re}\,w\!\big(i\gamma/(\sigma\sqrt2)\big)} . $$
+```math
+\phi(x) = \frac{\mathrm{Re}\,w\!\big((u + i\gamma)/(\sigma\sqrt2)\big)}
+                  {\mathrm{Re}\,w\!\big(i\gamma/(\sigma\sqrt2)\big)} .
+```
 
 $w$ is evaluated with Humlicek's `w4` rational approximation (relative accuracy
 $\sim 10^{-4}$, ample for line shapes; Humlicek, *JQSRT* **27**, 437, 1982). The
 limits are handled exactly: as $\sigma \to 0$ the shape becomes a Lorentzian, as
 $\gamma \to 0$ a Gaussian. The integral has no closed form and is computed by
 adaptive Simpson integration (refined near the peak, so a narrow line in a wide range stays accurate). The FWHM uses the
-Olivero–Longbothum approximation (accuracy $\sim 0.02\%$):
+Olivero–Longbothum approximation (accuracy $\sim 0.02$%):
 
-$$ \mathrm{FWHM} \approx 0.5346\,f_L + \sqrt{0.2166\,f_L^2 + f_G^2},
-   \qquad f_G = 2\sqrt{2\ln 2}\,\sigma, \quad f_L = 2\gamma . $$
+```math
+\mathrm{FWHM} \approx 0.5346\,f_L + \sqrt{0.2166\,f_L^2 + f_G^2},
+   \qquad f_G = 2\sqrt{2\ln 2}\,\sigma, \quad f_L = 2\gamma .
+```
 
 **Tailed Gaussian (gf3 / Hypermet)**, with parameters `mean` ($\mu$), `sigma`
 ($\sigma$), `tail_fraction` ($r \in [0,1]$), and `tail_length` ($\beta$). Many
@@ -105,10 +119,14 @@ detector peaks have a low-energy tail. GIGGLE uses the gf3 composite: a Gaussian
 core blended with a single left-sided exponential tail, normalised to one at the
 mean.
 
-$$ \phi(u) = \frac{(1-r)\,e^{-u^2/2\sigma^2} + r\,T(u)}{N_0},
-   \qquad N_0 = (1-r) + r\,\mathrm{erfc}(k), \quad k = \frac{\sigma}{\sqrt2\,\beta} $$
+```math
+\phi(u) = \frac{(1-r)\,e^{-u^2/2\sigma^2} + r\,T(u)}{N_0},
+   \qquad N_0 = (1-r) + r\,\mathrm{erfc}(k), \quad k = \frac{\sigma}{\sqrt2\,\beta}
+```
 
-$$ T(u) = e^{\,u/\beta}\,\mathrm{erfc}\!\left(\frac{u}{\sigma\sqrt2} + k\right) . $$
+```math
+T(u) = e^{\,u/\beta}\,\mathrm{erfc}\!\left(\frac{u}{\sigma\sqrt2} + k\right) .
+```
 
 Far above the mean the $e^{u/\beta}$ overflows while the $\mathrm{erfc}$
 underflows; their product decays like a Gaussian, so for
@@ -117,7 +135,9 @@ $T(u) \approx e^{-k^2 - v^2}/(t\sqrt\pi)$ with $v = u/(\sigma\sqrt2)$, to stay
 finite. The tail has a closed-form antiderivative (verified by differentiation),
 so the integral is exact:
 
-$$ \int T\,\mathrm{d}u = \beta\left[T(u) + e^{-k^2}\,\mathrm{erf}\frac{u}{\sigma\sqrt2}\right] . $$
+```math
+\int T\,\mathrm{d}u = \beta\left[T(u) + e^{-k^2}\,\mathrm{erf}\frac{u}{\sigma\sqrt2}\right] .
+```
 
 Because the profile is asymmetric, its FWHM is found numerically by locating
 both half-maximum crossings. Its reported **centroid is the core position**
@@ -129,12 +149,14 @@ standard calorimeter or scintillator response. The sign of $\alpha$ sets the
 side (low energy for $\alpha > 0$, high for $\alpha < 0$), as in ROOT. With
 $t = (x-\mu)/\sigma$ (and $t \to -t$ when $\alpha < 0$),
 
-$$ \phi(x) = \begin{cases}
+```math
+\phi(x) = \begin{cases}
    e^{-t^2/2}, & t > -\alpha,\\
    A\,(B - t)^{-n}, & t \le -\alpha,
    \end{cases}
    \qquad A = \left(\frac{n}{|\alpha|}\right)^{n} e^{-\alpha^2/2},
-   \quad B = \frac{n}{|\alpha|} - |\alpha|. $$
+   \quad B = \frac{n}{|\alpha|} - |\alpha|.
+```
 
 The core and tail meet smoothly at $t = -\alpha$ (matched value and first
 derivative), and $\phi(\mu) = 1$. GIGGLE reproduces ROOT's
@@ -152,9 +174,11 @@ also backs ROOT's `TMath::Landau`. Those coefficients are a fixed published
 recipe, not extracted from any particular ROOT version, so they do not change.
 The density is shifted so its peak lands on $\mu$ and normalised to one there:
 
-$$ \phi(x) = \frac{\mathcal{L}(\lambda)}{\mathcal{L}(\lambda_0)},
+```math
+\phi(x) = \frac{\mathcal{L}(\lambda)}{\mathcal{L}(\lambda_0)},
    \qquad \lambda = \frac{x - \mu}{s} + \lambda_0,
-   \qquad \lambda_0 \approx -0.2228, \quad \mathcal{L}(\lambda_0) \approx 0.18066, $$
+   \qquad \lambda_0 \approx -0.2228, \quad \mathcal{L}(\lambda_0) \approx 0.18066,
+```
 
 where $\lambda_0$ is the location of the Landau peak, so $\phi(\mu) = 1$. The
 integral is by adaptive Simpson. The Landau mean diverges, so the reported
@@ -166,22 +190,24 @@ numerically from the two half-maximum crossings.
 Backgrounds are anchored at the pivot $p$, so the amplitude is the background
 *level* there.
 
-| Shape | Parameters | $\phi(x)$ | $\int_a^b \phi\,\mathrm{d}x$ |
+| Shape | Parameters | $\phi(x)$ | $\int_a^b \phi\thinspace \mathrm{d}x$ |
 |---|---|---|---|
 | constant | none | $1$ | $b-a$ |
 | linear | `slope` $s$ | $1 + s(x-p)$ | $(b-a) + \tfrac{s}{2}\big[(b-p)^2-(a-p)^2\big]$ |
 | quadratic | `slope` $s$, `curvature` $c$ | $1 + s(x-p) + c(x-p)^2$ | linear $+\ \tfrac{c}{3}\big[(b-p)^3-(a-p)^3\big]$ |
-| exponential | `slope` $s$ | $e^{\,s(x-p)}$ | $\dfrac{e^{s(b-p)} - e^{s(a-p)}}{s}$ (→ $b-a$ as $s\to0$) |
-| step | `edge`, `width` | $\tfrac12\,\mathrm{erfc}\!\dfrac{x-\mathrm{edge}}{\sqrt2\,\mathrm{width}}$ | closed form (see below) |
+| exponential | `slope` $s$ | $e^{\thinspace s(x-p)}$ | $\dfrac{e^{s(b-p)} - e^{s(a-p)}}{s}$ (→ $b-a$ as $s\to0$) |
+| step | `edge`, `width` | $\tfrac12\thinspace \mathrm{erfc}\dfrac{x-\mathrm{edge}}{\sqrt2\thinspace \mathrm{width}}$ | closed form (see below) |
 
 A Gaussian may also be used as a background (same formula as the Gaussian peak).
 The **step** is one on the low-energy plateau and falls to zero across `width`,
 modelling a Compton-edge-like shelf; note this is the documented exception to
 "$\phi = 1$ at the pivot". Its antiderivative is
 
-$$ \int \tfrac12\,\mathrm{erfc}(t)\,\mathrm{d}x
+```math
+\int \tfrac12\,\mathrm{erfc}(t)\,\mathrm{d}x
    = \frac{\mathrm{width}}{\sqrt2}\Big(t\,\mathrm{erfc}(t) - \tfrac{1}{\sqrt\pi}e^{-t^2}\Big),
-   \qquad t = \frac{x-\mathrm{edge}}{\sqrt2\,\mathrm{width}} . $$
+   \qquad t = \frac{x-\mathrm{edge}}{\sqrt2\,\mathrm{width}} .
+```
 
 ### Custom shapes
 
@@ -205,30 +231,38 @@ correlation). Now suppose the true parameters sit a little off the best fit,
 $\theta = \hat\theta + \Delta\theta$. The count $N(\theta)$ shifts with them; for
 small wiggles, keep only the first (linear) term of its Taylor expansion:
 
-$$ \Delta N \approx \sum_i g_i\,\Delta\theta_i,
-   \qquad g_i = \frac{\partial N}{\partial \theta_i}, $$
+```math
+\Delta N \approx \sum_i g_i\,\Delta\theta_i,
+   \qquad g_i = \frac{\partial N}{\partial \theta_i},
+```
 
 so $g_i$ is just the slope of $N$ in parameter $i$. The uncertainty $\sigma_N^2$
 is the **variance** of $N$: the average of $\Delta N^2$ over the way the fitted
 parameters would scatter if the measurement were repeated many times. Multiplying the
 sum out,
 
-$$ \sigma_N^2 = \langle \Delta N^2\rangle
+```math
+\sigma_N^2 = \langle \Delta N^2\rangle
    = \Big\langle \Big(\sum_i g_i\,\Delta\theta_i\Big)\Big(\sum_j g_j\,\Delta\theta_j\Big) \Big\rangle
-   = \sum_{i,j} g_i\,g_j\,\langle \Delta\theta_i\,\Delta\theta_j\rangle . $$
+   = \sum_{i,j} g_i\,g_j\,\langle \Delta\theta_i\,\Delta\theta_j\rangle .
+```
 
-The averaged product $\langle \Delta\theta_i\,\Delta\theta_j\rangle$ is exactly the
+The averaged product $\langle \Delta\theta_i\thinspace \Delta\theta_j\rangle$ is exactly the
 covariance $C_{ij}$ (that is what the matrix holds), so
 
-$$ \sigma_N^2 = \sum_{i,j} g_i\,C_{ij}\,g_j = g^{\mathsf T} C\, g. $$
+```math
+\sigma_N^2 = \sum_{i,j} g_i\,C_{ij}\,g_j = g^{\mathsf T} C\, g.
+```
 
 With a single parameter and nothing to correlate, this is the familiar
-$\sigma_N = |\partial N/\partial\theta|\,\sigma_\theta$; the matrix form just sums
+$\sigma_N = |\partial N/\partial\theta|\thinspace \sigma_\theta$; the matrix form just sums
 every parameter's slope and every pair's correlation at once. For a count the
 gradient is
 
-$$ g = \Big[\ \underbrace{\textstyle\int \phi\,\mathrm{d}x}_{\partial N/\partial A},\ \
-   \underbrace{A\,\partial_{\theta_j}\!\textstyle\int \phi\,\mathrm{d}x}_{\partial N/\partial \theta_j}\ \Big] . $$
+```math
+g = \Big[\ \underbrace{\textstyle\int \phi\,\mathrm{d}x}_{\partial N/\partial A},\ \
+   \underbrace{A\,\partial_{\theta_j}\!\textstyle\int \phi\,\mathrm{d}x}_{\partial N/\partial \theta_j}\ \Big] .
+```
 
 The amplitude derivative is the shape integral itself; the shape-parameter
 derivatives are central finite differences on that integral (step
@@ -286,9 +320,11 @@ they are reported only when the cross-check runs.
 
 A component **agrees** when
 
-$$ |N_\text{ours} - N_\text{ref}| \le \max\big(0.01\,s,\ 0.3\,e\big)
+```math
+|N_\text{ours} - N_\text{ref}| \le \max\big(0.01\,s,\ 0.3\,e\big)
    \quad\text{and}\quad
-   |\sigma_\text{ours} - \sigma_\text{ref}| \le 0.10\,e, $$
+   |\sigma_\text{ours} - \sigma_\text{ref}| \le 0.10\,e,
+```
 
 where $s = \max(|N_\text{ours}|, |N_\text{ref}|)$ and
 $e = \max(\sigma_\text{ours}, \sigma_\text{ref})$. The Results panel shows the
