@@ -69,7 +69,7 @@ center of the fit range, $p = (x_{\min} + x_{\max})/2$.
 $$ \phi(x) = \exp\!\left(-\frac{(x-\mu)^2}{2\sigma^2}\right) $$
 
 $$ \int_a^b \phi\,\mathrm{d}x = \sigma\sqrt{\tfrac{\pi}{2}}
-   \left[\operatorname{erf}\frac{b-\mu}{\sigma\sqrt2} - \operatorname{erf}\frac{a-\mu}{\sigma\sqrt2}\right],
+   \left[\mathrm{erf}\frac{b-\mu}{\sigma\sqrt2} - \mathrm{erf}\frac{a-\mu}{\sigma\sqrt2}\right],
    \qquad \mathrm{FWHM} = 2\sqrt{2\ln 2}\,\sigma \approx 2.3548\,\sigma . $$
 
 **Lorentzian**, with parameters `mean` ($\mu$) and `gamma` ($\gamma$, the half
@@ -86,8 +86,8 @@ with a Lorentzian; it has no elementary closed form, so GIGGLE writes it through
 the [Faddeeva function](https://en.wikipedia.org/wiki/Faddeeva_function) $w$ and
 normalises by its central value:
 
-$$ \phi(x) = \frac{\operatorname{Re} w\!\big((u + i\gamma)/(\sigma\sqrt2)\big)}
-                  {\operatorname{Re} w\!\big(i\gamma/(\sigma\sqrt2)\big)} . $$
+$$ \phi(x) = \frac{\mathrm{Re}\,w\!\big((u + i\gamma)/(\sigma\sqrt2)\big)}
+                  {\mathrm{Re}\,w\!\big(i\gamma/(\sigma\sqrt2)\big)} . $$
 
 $w$ is evaluated with Humlicek's `w4` rational approximation (relative accuracy
 $\sim 10^{-4}$, ample for line shapes; Humlicek, *JQSRT* **27**, 437, 1982). The
@@ -106,18 +106,18 @@ core blended with a single left-sided exponential tail, normalised to one at the
 mean.
 
 $$ \phi(u) = \frac{(1-r)\,e^{-u^2/2\sigma^2} + r\,T(u)}{N_0},
-   \qquad N_0 = (1-r) + r\,\operatorname{erfc}(k), \quad k = \frac{\sigma}{\sqrt2\,\beta} $$
+   \qquad N_0 = (1-r) + r\,\mathrm{erfc}(k), \quad k = \frac{\sigma}{\sqrt2\,\beta} $$
 
-$$ T(u) = e^{\,u/\beta}\operatorname{erfc}\!\left(\frac{u}{\sigma\sqrt2} + k\right) . $$
+$$ T(u) = e^{\,u/\beta}\,\mathrm{erfc}\!\left(\frac{u}{\sigma\sqrt2} + k\right) . $$
 
-Far above the mean the $e^{u/\beta}$ overflows while the $\operatorname{erfc}$
+Far above the mean the $e^{u/\beta}$ overflows while the $\mathrm{erfc}$
 underflows; their product decays like a Gaussian, so for
 $t = u/(\sigma\sqrt2) + k > 6$ that region is computed from the asymptotic form
 $T(u) \approx e^{-k^2 - v^2}/(t\sqrt\pi)$ with $v = u/(\sigma\sqrt2)$, to stay
 finite. The tail has a closed-form antiderivative (verified by differentiation),
 so the integral is exact:
 
-$$ \int T\,\mathrm{d}u = \beta\left[T(u) + e^{-k^2}\operatorname{erf}\frac{u}{\sigma\sqrt2}\right] . $$
+$$ \int T\,\mathrm{d}u = \beta\left[T(u) + e^{-k^2}\,\mathrm{erf}\frac{u}{\sigma\sqrt2}\right] . $$
 
 Because the profile is asymmetric, its FWHM is found numerically by locating
 both half-maximum crossings. Its reported **centroid is the core position**
@@ -130,10 +130,10 @@ side (low energy for $\alpha > 0$, high for $\alpha < 0$), as in ROOT. With
 $t = (x-\mu)/\sigma$ (and $t \to -t$ when $\alpha < 0$),
 
 $$ \phi(x) = \begin{cases}
-   e^{-t^2/2}, & t > -\alpha,\\[4pt]
+   e^{-t^2/2}, & t > -\alpha,\\
    A\,(B - t)^{-n}, & t \le -\alpha,
    \end{cases}
-   \qquad A = \left(\frac{n}{|\alpha|}\right)^{\!n} e^{-\alpha^2/2},
+   \qquad A = \left(\frac{n}{|\alpha|}\right)^{n} e^{-\alpha^2/2},
    \quad B = \frac{n}{|\alpha|} - |\alpha|. $$
 
 The core and tail meet smoothly at $t = -\alpha$ (matched value and first
@@ -172,15 +172,15 @@ Backgrounds are anchored at the pivot $p$, so the amplitude is the background
 | linear | `slope` $s$ | $1 + s(x-p)$ | $(b-a) + \tfrac{s}{2}\big[(b-p)^2-(a-p)^2\big]$ |
 | quadratic | `slope` $s$, `curvature` $c$ | $1 + s(x-p) + c(x-p)^2$ | linear $+\ \tfrac{c}{3}\big[(b-p)^3-(a-p)^3\big]$ |
 | exponential | `slope` $s$ | $e^{\,s(x-p)}$ | $\dfrac{e^{s(b-p)} - e^{s(a-p)}}{s}$ (→ $b-a$ as $s\to0$) |
-| step | `edge`, `width` | $\tfrac12\operatorname{erfc}\!\dfrac{x-\mathrm{edge}}{\sqrt2\,\mathrm{width}}$ | closed form (see below) |
+| step | `edge`, `width` | $\tfrac12\,\mathrm{erfc}\!\dfrac{x-\mathrm{edge}}{\sqrt2\,\mathrm{width}}$ | closed form (see below) |
 
 A Gaussian may also be used as a background (same formula as the Gaussian peak).
 The **step** is one on the low-energy plateau and falls to zero across `width`,
 modelling a Compton-edge-like shelf; note this is the documented exception to
 "$\phi = 1$ at the pivot". Its antiderivative is
 
-$$ \int \tfrac12\operatorname{erfc}(t)\,\mathrm{d}x
-   = \frac{\mathrm{width}}{\sqrt2}\Big(t\operatorname{erfc}(t) - \tfrac{1}{\sqrt\pi}e^{-t^2}\Big),
+$$ \int \tfrac12\,\mathrm{erfc}(t)\,\mathrm{d}x
+   = \frac{\mathrm{width}}{\sqrt2}\Big(t\,\mathrm{erfc}(t) - \tfrac{1}{\sqrt\pi}e^{-t^2}\Big),
    \qquad t = \frac{x-\mathrm{edge}}{\sqrt2\,\mathrm{width}} . $$
 
 ### Custom shapes
