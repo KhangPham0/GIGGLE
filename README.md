@@ -57,15 +57,25 @@ The statistics, and the choices GIGGLE makes, are written out in
 ## Quick start
 
 You need a C++17 compiler, CMake ≥ 3.16, `git`, and an existing
-[ROOT](https://root.cern) install with `root-config` on your `PATH`. OpenGL is
-also needed, but it is normally already part of your system. GIGGLE is developed
-and tested with ROOT 6.36.04, and other versions are untested. See
-[`docs/building.md`](docs/building.md) for details, platform notes, and what to
-do if a build cannot find OpenGL.
+[ROOT](https://root.cern) install with `root-config` on your `PATH`. GIGGLE is
+developed and tested with ROOT 6.36.04; 6.38 and 6.40 are known to work too.
+
+On Linux, the vendored window and file-dialog libraries also need a few
+development packages. On Debian or Ubuntu (including WSL2):
+
+```sh
+sudo apt install build-essential cmake git pkg-config libgl1-mesa-dev \
+    libwayland-dev libxkbcommon-dev libxrandr-dev libxinerama-dev \
+    libxcursor-dev libxi-dev libgtk-3-dev
+```
+
+On macOS, Xcode's command line tools cover everything. The Fedora package list,
+notes on ROOT from Homebrew, conda, or the official binaries, and the fixes for
+the configure errors you may see are in [`docs/building.md`](docs/building.md).
 
 ```sh
 # Clone with the vendored libraries (GLFW, Dear ImGui, ImPlot, …)
-git clone --recurse-submodules <repo-url> giggle
+git clone --recurse-submodules https://github.com/KhangPham0/GIGGLE.git giggle
 cd giggle
 
 # Configure and build (ROOT is located automatically via root-config)
@@ -105,13 +115,14 @@ You supply:
 - A C++17 compiler (recent Clang, GCC, or Apple Clang).
 - [CMake](https://cmake.org) ≥ 3.16.
 - `git` (for the vendored submodules).
-- [ROOT](https://root.cern), with `root-config` reachable and built with the same
-  C++ standard. **You supply ROOT**; it is not vendored. Developed and tested with
-  6.36.04; other versions are untested.
+- [ROOT](https://root.cern), with `root-config` reachable. **You supply ROOT**;
+  it is not vendored. Developed and tested with 6.36.04; 6.38 and 6.40 are known
+  to work. A ROOT built with C++20 (Homebrew, conda-forge) is fine; the build
+  warns and carries on.
 
-Also needed, but normally already present: **OpenGL** (a built-in framework on
-macOS, the mesa/libGL package on Linux). If a build cannot find it,
-[`docs/building.md`](docs/building.md) explains how to install it.
+On Linux, also the development packages for OpenGL, Wayland, X11, and GTK 3:
+one `apt` or `dnf` line, listed in [`docs/building.md`](docs/building.md). On
+macOS they all come with Xcode's command line tools.
 
 Everything else is vendored as git submodules and built from source:
 [GLFW](https://github.com/glfw/glfw),

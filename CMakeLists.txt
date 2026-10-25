@@ -34,15 +34,20 @@ endif()
 # version (see docs/building.md), and other versions are simply untested.
 find_package(ROOT REQUIRED)
 
-# A ROOT built with a different C++ standard than this project can produce
-# link or runtime errors that are hard to diagnose. Warn early and say how
-# to fix it, but let the build proceed.
+# A ROOT built with a different C++ standard than this project is usually
+# fine: ROOT's imported targets carry their own standard, so the rootbridge
+# library is compiled with it automatically (Homebrew and conda-forge ROOT,
+# both C++20, build and run this way). Say so, and say what to change if it
+# ever does cause trouble, but let the build proceed.
 if(DEFINED ROOT_CXX_STANDARD AND NOT ROOT_CXX_STANDARD STREQUAL CMAKE_CXX_STANDARD)
     message(WARNING
         "ROOT was built with C++${ROOT_CXX_STANDARD} but this project is set "
-        "to C++${CMAKE_CXX_STANDARD}. If the build or the application "
-        "misbehaves, change the set(CMAKE_CXX_STANDARD ...) line near the "
-        "top of CMakeLists.txt in the project root to ${ROOT_CXX_STANDARD}.")
+        "to C++${CMAKE_CXX_STANDARD}. This is usually harmless: the one "
+        "library that includes ROOT headers is compiled as "
+        "C++${ROOT_CXX_STANDARD} automatically. Only if the build or the "
+        "application misbehaves, change the set(CMAKE_CXX_STANDARD ...) line "
+        "near the top of CMakeLists.txt in the project root to "
+        "${ROOT_CXX_STANDARD}.")
 endif()
 
 add_subdirectory(vendor)
